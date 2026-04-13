@@ -1281,6 +1281,16 @@ pub fn homebrew_prefix() -> PathBuf {
             let linuxbrew = PathBuf::from("/home/linuxbrew/.linuxbrew");
             if linuxbrew.join("Cellar").exists() {
                 linuxbrew
+            } else if let Some(user_lb) =
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".linuxbrew"))
+            {
+                if user_lb.join("Cellar").exists() {
+                    user_lb
+                } else if PathBuf::from("/usr/local").join("Cellar").exists() {
+                    PathBuf::from("/usr/local")
+                } else {
+                    linuxbrew
+                }
             } else if PathBuf::from("/usr/local").join("Cellar").exists() {
                 PathBuf::from("/usr/local")
             } else {
