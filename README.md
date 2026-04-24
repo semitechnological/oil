@@ -6,11 +6,6 @@
 
 A fast, modern package manager that leverages Homebrew's ecosystem without the overhead. Built in Rust for speed and reliability, wax provides 16-20x faster search operations and parallel installation workflows while maintaining full compatibility with Homebrew formulae and bottles.
 
-## Current status
-
-- cargo test passes on the current checkout.
-- Recent work focuses on source-build and system package handling.
-
 ## Overview
 
 Wax reimagines package management by replacing Homebrew's git-based tap system with direct JSON API access and parallel async operations. It reads from the same bottle CDN and formula definitions but executes operations through a compiled binary with modern concurrency primitives. The result is a package manager that feels instant for read operations and maximizes throughput for installations.
@@ -37,16 +32,15 @@ Wax reimagines package management by replacing Homebrew's git-based tap system w
 **One-liner (recommended)** — downloads the pre-built binary for your platform:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/semitechnological/wax/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/plyght/wax/master/install.sh | bash
 ```
 
 Installs to `~/.local/bin/wax`. Override the destination with `WAX_INSTALL_DIR=/usr/local/bin`.
-Pin a specific release with `WAX_VERSION=v0.13.3`.
 
 **From a git clone** (builds with your Rust toolchain; no GitHub download):
 
 ```bash
-git clone https://github.com/semitechnological/wax.git
+git clone https://github.com/plyght/wax.git
 cd wax
 ./install.sh
 ```
@@ -95,7 +89,7 @@ cargo install waxpkg
 **From source (manual)** — equivalent to `./install.sh` from a clone:
 
 ```bash
-git clone https://github.com/semitechnological/wax.git
+git clone https://github.com/plyght/wax.git
 cd wax
 cargo build --release
 cp target/release/wax ~/.local/bin/
@@ -112,6 +106,8 @@ wax update -s            # stable (from crates.io)
 wax update --self        # same as above
 wax update -sn           # nightly (from GitHub)
 wax update -sf           # force reinstall
+wax update -sn --clean   # nightly + clean cargo git cache
+wax update -sn --no-clean  # nightly + keep cargo cache
 
 # Search packages
 wax search nginx
@@ -156,6 +152,7 @@ wax outdated
 wax upgrade              # upgrade all outdated packages
 wax upgrade nginx        # upgrade specific package
 wax upgrade nginx tree   # upgrade multiple packages
+wax upgrade --self       # upgrade wax itself
 wax up nginx             # shorthand
 
 # Generate lockfile
@@ -276,6 +273,11 @@ See `docs/comparison.md` for detailed methodology and analysis.
 - **Formula DSL Subset**: Parses essential Ruby formula syntax. Advanced features (conditional deps, patches, custom install blocks) may not be fully supported.
 - **macOS Primary**: Developed for macOS. Linux support is functional but less tested.
 - **No Post-Install Scripts**: Skips formula post-install hooks for security and performance. Some packages may require manual configuration.
+
+## Acknowledgments
+
+Huge thanks to [@undivisible](https://github.com/undivisible) on GitHub for being a massive help and contributor to this project. Wax wouldn't be what it is without his support. <br>
+[@undivisible](https://github.com/undivisible): Huge thanks to [@plyght](https://github.com/plyght) for making the original base and contributing with all our projects together. Keep an eye on our org! We are going to make great things together!
 
 ## License
 

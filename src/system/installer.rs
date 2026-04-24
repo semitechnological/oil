@@ -102,7 +102,7 @@ impl SystemInstaller {
 
                 debug!("Downloading {} from {}", pkg_name, url);
                 let mut clear_guard = ProgressBarGuard::new(&pb_clone);
-                dl.download(&url, &dest, Some(&pb_clone), max_conns).await?;
+                dl.download(&url, &dest, Some(&pb_clone), max_conns, None).await?;
                 clear_guard.clear_now();
 
                 // Verify SHA256 if available

@@ -28,11 +28,24 @@ impl std::fmt::Display for InstalledRow {
     }
 }
 
-async fn collect_installed_rows() -> Result<Vec<InstalledRow>> {
+/// Validates that a path does not contain parent-directory traversal components.
+fn validate_cellar_path(path: &std::path::Path) -> Result<PathBuf> {
+    if path.components().any(|c| c == std::path::Component::ParentDir) {
+        return Err(WaxError::InvalidInput(format!(
+            "Cellar path contains parent-directory traversal: {}",
+            path.display()
+        )));
+    }
+    Ok(path.to_path_buf())
+}
+
+async fn collect_installed_rows(_cache: &Cache) -> Result<Vec<InstalledRow>> {
     let test_cellar = std::env::var_os(WAX_TEST_CELLAR_ENV);
 
     let (cellar_path, skip_casks) = if let Some(ref raw) = test_cellar {
-        (PathBuf::from(raw), true)
+        let pb = PathBuf::from(raw);
+        validate_cellar_path(&pb)?;
+        (pb, true)
     } else {
         let candidates = [
             homebrew_prefix().join("Cellar"),
@@ -54,6 +67,10 @@ async fn collect_installed_rows() -> Result<Vec<InstalledRow>> {
     } else {
         cask_state.load().await?
     };
+
+    // External cask discovery is handled by sync/lock commands
+    // which save discovered casks to CaskState for persistence.
+    // List here only shows what's in CaskState.
 
     let install_state = InstallState::new()?;
     let installed_packages = install_state.load().await?;
@@ -230,10 +247,7 @@ async fn offer_upgrade_for_selection(cache: &Cache, choice: &InstalledRow) -> Re
 
     let prompt = format!(
         "Upgrade {}{} from {} → {}?",
-        choice.name,
-        cask_note,
-        pkg.installed_version,
-        pkg.latest_version
+        choice.name, cask_note, pkg.installed_version, pkg.latest_version
     );
 
     let should_upgrade = Confirm::new(prompt.as_str())
@@ -243,7 +257,7 @@ async fn offer_upgrade_for_selection(cache: &Cache, choice: &InstalledRow) -> Re
         .unwrap_or(false);
 
     if should_upgrade {
-        run_upgrade(cache, &[choice.name.clone()], false).await?;
+        run_upgrade(cache, std::slice::from_ref(&choice.name), false).await?;
         println!(
             "\n{} {}",
             style("✓").green(),
@@ -258,7 +272,7 @@ async fn run_interactive_list(cache: &Cache, initial_query: Option<String>) -> R
     let mut first_prompt = true;
 
     loop {
-        let rows = collect_installed_rows().await?;
+        let rows = collect_installed_rows(cache).await?;
         if rows.is_empty() {
             println!("no packages installed");
             return Ok(());
@@ -343,16 +357,15 @@ pub async fn list(
     if upgradable {
         return list_upgradable(cache).await;
     }
-    let rows = collect_installed_rows().await?;
+    let rows = collect_installed_rows(cache).await?;
 
     if rows.is_empty() {
         println!("no packages installed");
         return Ok(());
     }
 
-    let use_ui = io::stdin().is_terminal()
-        && io::stdout().is_terminal()
-        && std::env::var_os("CI").is_none();
+    let use_ui =
+        io::stdin().is_terminal() && io::stdout().is_terminal() && std::env::var_os("CI").is_none();
 
     if use_ui {
         return run_interactive_list(cache, query).await;
@@ -379,8 +392,8 @@ pub async fn list(
 
 #[cfg(test)]
 mod tests {
-    use super::InstalledRow;
     use super::matches_query;
+    use super::InstalledRow;
 
     fn row(name: &str, line: &str) -> InstalledRow {
         InstalledRow {

@@ -289,6 +289,7 @@ pub async fn version_install(
             &tarball_path,
             Some(&pb),
             BottleDownloader::GLOBAL_CONNECTION_POOL,
+            None,
         )
         .await?;
     pb.finish_and_clear();
@@ -304,11 +305,21 @@ pub async fn version_install(
     if formula_cellar.exists() {
         tokio::fs::remove_dir_all(&formula_cellar)
             .await
-            .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))?;
+            .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))
+            .map_err(|e| crate::error::WaxError::InstallError(format!(
+                "Failed to clean old version at {}: {}",
+                formula_cellar.display(),
+                e
+            )))?;
     }
     tokio::fs::create_dir_all(&formula_cellar)
         .await
-        .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))?;
+        .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))
+        .map_err(|e| crate::error::WaxError::InstallError(format!(
+            "Failed to create cellar directory {}: {}",
+            formula_cellar.display(),
+            e
+        )))?;
 
     let actual_content_dir = extract_dir.join(formula_name).join(version);
     if actual_content_dir.exists() {

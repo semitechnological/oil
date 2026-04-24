@@ -33,6 +33,23 @@ use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use version::WAX_VERSION;
 
+fn should_refresh_state(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::Completions { .. } | Commands::__RefreshState
+    )
+}
+
+async fn refresh_state_in_child_process() {
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+
+    let _ = std::process::Command::new(exe)
+        .arg("__refresh_state")
+        .status();
+}
+
 #[derive(Parser)]
 #[command(name = "wax")]
 #[command(version = WAX_VERSION)]
@@ -71,6 +88,13 @@ enum Commands {
             help = "Force reinstall even if on latest version (with --self)"
         )]
         force: bool,
+        #[arg(
+            long,
+            help = "After nightly self-update, clean Cargo git cache for wax"
+        )]
+        clean: bool,
+        #[arg(long, help = "After nightly self-update, keep Cargo git cache")]
+        no_clean: bool,
     },
 
     #[command(
@@ -119,7 +143,10 @@ enum Commands {
         global: bool,
         #[arg(long, help = "Build from source even if bottle available")]
         build_from_source: bool,
-        #[arg(long, help = "Install the HEAD version (clones git repo, builds from source)")]
+        #[arg(
+            long,
+            help = "Install the HEAD version (clones git repo, builds from source)"
+        )]
         head: bool,
     },
 
@@ -179,6 +206,8 @@ enum Commands {
     Upgrade {
         #[arg(help = "Package name(s) to upgrade (upgrades all if omitted)")]
         packages: Vec<String>,
+        #[arg(long = "self", help = "Upgrade wax itself")]
+        upgrade_self: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(
@@ -259,6 +288,9 @@ enum Commands {
 
     #[command(about = "Generate lockfile from installed packages")]
     Lock,
+
+    #[command(name = "__refresh_state", hide = true)]
+    __RefreshState,
 
     #[command(about = "Install packages from lockfile")]
     Sync,
@@ -403,7 +435,12 @@ enum TapAction {
         #[arg(help = "Tap specification: user/repo, Git URL, local directory, or .rb file path")]
         tap: String,
     },
-    #[command(about = "Remove a custom tap", visible_alias = "rm", alias = "uninstall", alias = "delete")]
+    #[command(
+        about = "Remove a custom tap",
+        visible_alias = "rm",
+        alias = "uninstall",
+        alias = "delete"
+    )]
     Remove {
         #[arg(help = "Tap specification: user/repo, Git URL, local directory, or .rb file path")]
         tap: String,
@@ -466,6 +503,12 @@ async fn handle_system_upgrade() -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
+    if let Some(ref command) = cli.command {
+        if should_refresh_state(command) {
+            refresh_state_in_child_process().await;
+        }
+    }
+
     signal::install_handler();
     init_logging(cli.verbose)?;
 
@@ -487,14 +530,32 @@ async fn main() -> Result<()> {
             update_self,
             nightly,
             force,
+            clean,
+            no_clean,
         } => {
             if update_self {
+                if clean && no_clean {
+                    return Err(error::WaxError::InvalidInput(
+                        "Cannot specify both --clean and --no-clean".to_string(),
+                    ));
+                }
                 let channel = if nightly {
                     commands::self_update::Channel::Nightly
                 } else {
                     commands::self_update::Channel::Stable
                 };
-                commands::self_update::self_update(channel, force).await
+                let nightly_cleanup = if channel == commands::self_update::Channel::Nightly {
+                    if clean {
+                        Some(true)
+                    } else if no_clean {
+                        Some(false)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                commands::self_update::self_update(channel, force, nightly_cleanup).await
             } else {
                 commands::update::update(&api_client, &cache).await
             }
@@ -560,19 +621,39 @@ async fn main() -> Result<()> {
         } => commands::install::postinstall(&cache, &formulae, user, global).await,
         Commands::Upgrade {
             packages,
+            upgrade_self,
             dry_run,
             system,
         } => {
+            if upgrade_self {
+                commands::self_update::self_update(
+                    commands::self_update::Channel::Stable,
+                    false,
+                    None,
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let explicit_packages_requested = !packages.is_empty();
+
             commands::upgrade::upgrade(&cache, &packages, dry_run).await?;
             if system {
                 handle_system_upgrade().await?;
             }
-            // Always check for a wax update at the end of upgrade.
-            commands::self_update::self_update(
-                commands::self_update::Channel::Stable,
-                false,
-            )
-            .await?;
+
+            // Only check for wax self-update after a full upgrade run.
+            // For explicit package upgrades (e.g. `wax up codex`), skip this
+            // to avoid unrelated self-update output in command results.
+            if !explicit_packages_requested {
+                commands::self_update::self_update(
+                    commands::self_update::Channel::Stable,
+                    false,
+                    None,
+                )
+                .await?;
+            }
+
             Ok(())
         }
         Commands::System { action } => match action {
@@ -679,6 +760,7 @@ async fn main() -> Result<()> {
         }
         Commands::Unpin { packages } => commands::pin::unpin(&packages).await,
         Commands::Lock => commands::lock::lock(&cache).await,
+        Commands::__RefreshState => commands::refresh::refresh(&cache).await,
         Commands::Sync => commands::sync::sync(&cache).await,
         Commands::Tap { action, repair } => commands::tap::tap(action, repair, Some(&cache)).await,
         Commands::Doctor { fix } => commands::doctor::doctor(&cache, fix).await,

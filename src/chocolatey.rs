@@ -87,7 +87,7 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     );
     pb.set_message(id.to_string());
 
-    dl.download(&nupkg_url, &nupkg_path, Some(&pb), conns).await?;
+    dl.download(&nupkg_url, &nupkg_path, Some(&pb), conns, None).await?;
     pb.finish_and_clear();
 
     let extract_root = tmp.path().join("nupkg");

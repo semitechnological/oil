@@ -211,7 +211,7 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     );
     pb.set_message(format!("{} {}", package_id, latest));
 
-    dl.download(&inst.installer_url, &archive_path, Some(&pb), conns)
+    dl.download(&inst.installer_url, &archive_path, Some(&pb), conns, None)
         .await?;
     pb.finish_and_clear();
 

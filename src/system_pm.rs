@@ -47,29 +47,28 @@ impl SystemPm {
     /// Detect the most appropriate system package manager on the current host.
     pub async fn detect() -> Option<Self> {
         if cfg!(target_os = "macos") {
-            return which("brew").await.then_some(Self::Brew);
-        }
+            None
+        } else {
+            let candidates: &[(&str, Self)] = &[
+                ("apt-get", Self::Apt),
+                ("dnf", Self::Dnf),
+                ("pacman", Self::Pacman),
+                ("apk", Self::Apk),
+                ("zypper", Self::Zypper),
+                ("emerge", Self::Emerge),
+                ("yum", Self::Yum),
+                ("xbps-install", Self::Xbps),
+                ("nix-env", Self::Nix),
+            ];
 
-        let candidates: &[(&str, Self)] = &[
-            ("apt-get", Self::Apt),
-            ("dnf", Self::Dnf),
-            ("pacman", Self::Pacman),
-            ("apk", Self::Apk),
-            ("zypper", Self::Zypper),
-            ("emerge", Self::Emerge),
-            ("yum", Self::Yum),
-            ("xbps-install", Self::Xbps),
-            ("nix-env", Self::Nix),
-            ("brew", Self::Brew),
-        ];
-
-        for (bin, pm) in candidates {
-            if which(bin).await {
-                debug!("Detected system package manager: {}", bin);
-                return Some(pm.clone());
+            for (bin, pm) in candidates {
+                if which(bin).await {
+                    debug!("Detected system package manager: {}", bin);
+                    return Some(pm.clone());
+                }
             }
+            None
         }
-        None
     }
 
     /// Upgrade all packages managed by this PM.

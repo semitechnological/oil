@@ -7,8 +7,10 @@ use crate::lockfile::{Lockfile, LockfileCask, LockfilePackage};
 use tracing::instrument;
 
 #[instrument(skip(cache))]
-pub async fn lock(cache: &Cache) -> Result<()> {
-    let formulae = cache.load_formulae().await?;
+pub async fn refresh(cache: &Cache) -> Result<()> {
+    cache.ensure_fresh().await?;
+
+    let formulae = cache.load_all_formulae().await?;
     let casks = cache.load_casks().await?;
 
     let state = InstallState::new()?;
@@ -55,28 +57,8 @@ pub async fn lock(cache: &Cache) -> Result<()> {
         }
     }
 
-    let package_count = lockfile.packages.len();
-    let cask_count = lockfile.casks.len();
-
-    if package_count == 0 && cask_count == 0 {
-        println!("no packages or casks installed");
-        return Ok(());
-    }
-
     let lockfile_path = Lockfile::default_path();
     lockfile.save(&lockfile_path).await?;
-
-    println!(
-        "locked {} {} and {} {} in wax.lock",
-        package_count,
-        if package_count == 1 {
-            "package"
-        } else {
-            "packages"
-        },
-        cask_count,
-        if cask_count == 1 { "cask" } else { "casks" }
-    );
 
     Ok(())
 }

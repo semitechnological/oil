@@ -1,4 +1,4 @@
-use crate::bottle::{BottleDownloader, homebrew_prefix};
+use crate::bottle::{homebrew_prefix, BottleDownloader, DownloadTotals};
 use crate::error::{Result, WaxError};
 use crate::ui::dirs;
 use indicatif::ProgressBar;
@@ -48,7 +48,8 @@ impl CaskState {
     pub async fn load(&self) -> Result<HashMap<String, InstalledCask>> {
         let mut casks = HashMap::new();
 
-        // 1. Load from legacy state file (if any)
+        // Load only from legacy state file - NOT from Caskroom directories
+        // This ensures we only show casks that were explicitly tracked
         if self.legacy_state_path.exists() {
             if let Ok(json) = fs::read_to_string(&self.legacy_state_path).await {
                 if let Ok(legacy_casks) =
@@ -59,48 +60,10 @@ impl CaskState {
             }
         }
 
-        // 2. Scan Homebrew Caskroom and User Caskroom
-        let mut caskrooms = vec![Self::caskroom_dir()];
-        if let Ok(user_dir) = Self::user_caskroom_dir() {
-            caskrooms.push(user_dir);
-        }
-
-        for caskroom in caskrooms {
-            if !caskroom.exists() {
-                continue;
-            }
-
-            let mut entries = tokio::fs::read_dir(&caskroom).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let file_type = entry.file_type().await?;
-                if !file_type.is_dir() {
-                    continue;
-                }
-
-                let cask_name = entry.file_name().to_string_lossy().to_string();
-                if cask_name.starts_with('.') {
-                    continue;
-                }
-
-                // Find version and install date
-                let (version, install_date) = self.scan_cask_version_dir(&entry.path()).await?;
-
-                casks
-                    .entry(cask_name.clone())
-                    .or_insert_with(|| InstalledCask {
-                        name: cask_name,
-                        version,
-                        install_date,
-                        artifact_type: None,
-                        binary_paths: None,
-                        app_name: None,
-                    });
-            }
-        }
-
         Ok(casks)
     }
 
+    #[allow(dead_code)]
     async fn scan_cask_version_dir(&self, cask_path: &Path) -> Result<(String, i64)> {
         let mut version = "unknown".to_string();
         let mut install_date = 0;
@@ -194,11 +157,9 @@ impl CaskState {
 }
 
 async fn installed_cask_version_dir(cask: &InstalledCask) -> Result<Option<PathBuf>> {
-    let mut candidates = vec![
-        CaskState::caskroom_dir()
-            .join(&cask.name)
-            .join(&cask.version),
-    ];
+    let mut candidates = vec![CaskState::caskroom_dir()
+        .join(&cask.name)
+        .join(&cask.version)];
     if let Ok(user_dir) = CaskState::user_caskroom_dir() {
         candidates.push(user_dir.join(&cask.name).join(&cask.version));
     }
@@ -361,10 +322,10 @@ impl RollbackContext {
 impl Drop for RollbackContext {
     fn drop(&mut self) {
         if !self.committed && !self.installed_paths.is_empty() {
-            println!(
+            crate::signal::println_through_active_multi(format!(
                 "  ⚠️  rolling back {} partially installed artifact(s)...",
                 self.installed_paths.len()
-            );
+            ));
             for path in &self.installed_paths {
                 if path.exists() {
                     if path.is_dir() {
@@ -376,6 +337,23 @@ impl Drop for RollbackContext {
             }
         }
     }
+}
+
+/// Maximum allowed size for a cask staging directory after extraction (5 GB).
+const MAX_STAGING_SIZE_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+
+fn dir_size(path: &Path) -> std::io::Result<u64> {
+    let mut total = 0u64;
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            total += dir_size(&entry.path())?;
+        } else {
+            total += metadata.len();
+        }
+    }
+    Ok(total)
 }
 
 impl StagingContext {
@@ -430,13 +408,28 @@ impl StagingContext {
                     .output()
                     .await?;
 
-                if !attach_output.status.success() {
-                    return Err(WaxError::InstallError(format!(
-                        "Failed to mount DMG: {}",
-                        String::from_utf8_lossy(&attach_output.stderr)
-                    )));
+                if attach_output.status.success() {
+                    mount_point = Some(mp);
+                } else {
+                    // Some casks use extensionless endpoints that are actually ZIP files.
+                    // If DMG mounting fails, try ZIP extraction as a fallback.
+                    let unzip_output = tokio::process::Command::new("unzip")
+                        .arg("-q")
+                        .arg("-o")
+                        .arg(download_path)
+                        .arg("-d")
+                        .arg(&staging_root)
+                        .output()
+                        .await?;
+
+                    if !unzip_output.status.success() {
+                        return Err(WaxError::InstallError(format!(
+                            "Failed to mount DMG and fallback unzip failed: {} | {}",
+                            String::from_utf8_lossy(&attach_output.stderr),
+                            String::from_utf8_lossy(&unzip_output.stderr)
+                        )));
+                    }
                 }
-                mount_point = Some(mp);
             }
             "zip" => {
                 let unzip_output = tokio::process::Command::new("unzip")
@@ -489,7 +482,15 @@ impl StagingContext {
                 let decoded_filename = urlencoding::decode(original_filename)
                     .unwrap_or(std::borrow::Cow::Borrowed(original_filename));
 
-                let dest = staging_root.join(decoded_filename.as_ref());
+                let filename = decoded_filename.as_ref();
+                if filename.contains("..") || filename.starts_with("/") || filename.contains("\0") {
+                    return Err(WaxError::InstallError(format!(
+                        "Filename contains unsafe characters: {}",
+                        filename
+                    )));
+                }
+
+                let dest = staging_root.join(filename);
                 tokio::fs::copy(download_path, &dest).await?;
             }
         }
@@ -499,6 +500,20 @@ impl StagingContext {
         } else {
             staging_root
         };
+
+        // Guard against zip-bomb / archive-bomb resource exhaustion.
+        match dir_size(&actual_staging_root) {
+            Ok(size) if size > MAX_STAGING_SIZE_BYTES => {
+                return Err(WaxError::InstallError(format!(
+                    "Extracted cask staging directory exceeds size limit ({} > {} bytes)",
+                    size, MAX_STAGING_SIZE_BYTES
+                )));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Unable to compute staging directory size: {}", e);
+            }
+        }
 
         Ok(Self {
             staging_root: actual_staging_root,
@@ -582,7 +597,7 @@ impl CaskInstaller {
             }
         }
 
-        let local_bin = dirs::home_dir()?.join(".local").join("bin");
+        let local_bin = Self::user_bin_dir()?;
         tokio::fs::create_dir_all(&local_bin).await?;
         debug!("Using fallback bin directory: {:?}", local_bin);
         Ok(local_bin)
@@ -598,6 +613,10 @@ impl CaskInstaller {
 
     fn looks_like_bin_dir(path: &Path) -> bool {
         path.file_name().map(|name| name == "bin").unwrap_or(false)
+    }
+
+    fn user_bin_dir() -> Result<PathBuf> {
+        Ok(dirs::home_dir()?.join(".local").join("wax").join("bin"))
     }
 
     async fn is_dir_writable(path: &Path) -> bool {
@@ -628,15 +647,68 @@ impl CaskInstaller {
             staging.staging_root.join(&path)
         };
 
-        // Reject path traversal attempts (e.g. "../../etc/passwd")
-        if resolved
-            .components()
-            .any(|c| c == std::path::Component::ParentDir)
-        {
+        // For absolute paths, only allow known-safe directories.
+        if p.is_absolute() {
+            let allowed_prefixes: Vec<PathBuf> = vec![
+                crate::bottle::homebrew_prefix(),
+                staging.staging_root.clone(),
+                #[cfg(target_os = "macos")]
+                PathBuf::from("/Applications"),
+                #[cfg(not(target_os = "macos"))]
+                dirs::home_dir().unwrap_or_else(|_| PathBuf::from("/tmp")).join("Applications"),
+            ];
+            let is_allowed = allowed_prefixes.iter().any(|allowed| {
+                let Ok(normalized) = dunce::canonicalize(&resolved).or_else(|_| {
+                    // If canonicalize fails, do a simple prefix check
+                    Ok::<_, std::io::Error>(resolved.clone())
+                }) else {
+                    return false;
+                };
+                normalized.starts_with(allowed)
+            });
+            if !is_allowed {
+                tracing::warn!(
+                    "Rejecting absolute source path outside safe directories: {} (resolved: {:?})",
+                    source_rel,
+                    resolved
+                );
+                return staging.staging_root.join(
+                    Path::new(source_rel)
+                        .file_name()
+                        .unwrap_or(std::ffi::OsStr::new("unknown")),
+                );
+            }
+            return resolved;
+        }
+
+        // For relative paths, normalize and ensure it stays inside staging_root.
+        let mut normalized = PathBuf::new();
+        for component in resolved.components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    if !normalized.pop() {
+                        tracing::warn!(
+                            "Rejecting source path that escapes staging root: {} (resolved: {:?})",
+                            source_rel,
+                            resolved
+                        );
+                        return staging.staging_root.join(
+                            Path::new(source_rel)
+                                .file_name()
+                                .unwrap_or(std::ffi::OsStr::new("unknown")),
+                        );
+                    }
+                }
+                std::path::Component::CurDir => {}
+                other => normalized.push(other),
+            }
+        }
+
+        if !normalized.starts_with(&staging.staging_root) {
             tracing::warn!(
-                "Rejecting source path with traversal: {} (resolved: {:?})",
+                "Rejecting source path that escapes staging root: {} (normalized: {:?})",
                 source_rel,
-                resolved
+                normalized
             );
             return staging.staging_root.join(
                 Path::new(source_rel)
@@ -645,7 +717,7 @@ impl CaskInstaller {
             );
         }
 
-        resolved
+        normalized
     }
 
     /// Probe a URL via HEAD request to detect artifact type from response headers.
@@ -701,12 +773,13 @@ impl CaskInstaller {
         None
     }
 
-    #[instrument(skip(self, progress))]
+    #[instrument(skip(self, progress, totals))]
     pub async fn download_cask(
         &self,
         url: &str,
         dest_path: &Path,
         progress: Option<&ProgressBar>,
+        totals: Option<&DownloadTotals>,
     ) -> Result<()> {
         debug!("Downloading cask from {}", url);
         self.downloader
@@ -715,6 +788,7 @@ impl CaskInstaller {
                 dest_path,
                 progress,
                 BottleDownloader::GLOBAL_CONNECTION_POOL,
+                totals,
             )
             .await
     }
@@ -750,6 +824,20 @@ impl CaskInstaller {
         }
 
         debug!("Checksum verified: {}", hash);
+        Ok(())
+    }
+
+    /// Rejects paths that contain parent-directory traversal components.
+    fn reject_traversal(path: &Path) -> Result<()> {
+        if path
+            .components()
+            .any(|c| c == std::path::Component::ParentDir)
+        {
+            return Err(WaxError::InstallError(format!(
+                "Path contains directory traversal: {}",
+                path.display()
+            )));
+        }
         Ok(())
     }
 
@@ -885,6 +973,8 @@ impl CaskInstaller {
                 .unwrap_or(source_rel)
         });
 
+        Self::reject_traversal(Path::new(name))?;
+
         info!("Installing binary: {} from {:?}", name, source);
 
         if !source.exists() {
@@ -904,10 +994,10 @@ impl CaskInstaller {
                             tokio::fs::create_dir_all(parent).await.ok();
                         }
                         if tokio::fs::write(&source, script_content).await.is_ok() {
-                            println!(
+                            crate::signal::println_through_active_multi(format!(
                                 "  {} generated wrapper script via preflight",
                                 console::style("✓").green()
-                            );
+                            ));
                         }
                     }
                 }
@@ -915,8 +1005,8 @@ impl CaskInstaller {
         }
 
         if !source.exists() {
-            println!(
-                "  ⚠️  skipping binary: source not found (possibly requires preflight script)"
+            crate::signal::println_through_active_multi(
+                "  ⚠️  skipping binary: source not found (possibly requires preflight script)",
             );
             return Ok(Vec::new());
         }
@@ -1197,6 +1287,7 @@ impl CaskInstaller {
     ) -> Result<()> {
         let source = self.resolve_source_path(staging, source_rel);
         let dest = PathBuf::from(target_path);
+        Self::reject_traversal(&dest)?;
 
         if let Some(parent) = dest.parent() {
             tokio::fs::create_dir_all(parent).await?;
@@ -1311,6 +1402,8 @@ impl CaskInstaller {
                 .and_then(|n| n.to_str())
                 .unwrap_or(token)
         });
+
+        Self::reject_traversal(Path::new(filename))?;
 
         let dest = dest_dir.join(filename);
 
@@ -1469,12 +1562,34 @@ mod tests {
         let res = installer.resolve_source_path(&staging, "$APPDIR/Contents/MacOS/qux");
         assert_eq!(res, staging_root.join("Contents/MacOS/qux"));
 
-        // Test absolute path
+        // Test absolute path outside safe directories — should fall back to staging root
         let res = installer.resolve_source_path(&staging, "/usr/bin/true");
-        assert_eq!(res, PathBuf::from("/usr/bin/true"));
+        assert_eq!(res, staging_root.join("true"));
 
         // Test relative path
         let res = installer.resolve_source_path(&staging, "relative/path");
         assert_eq!(res, staging_root.join("relative/path"));
+
+        // Test path traversal is rejected
+        let res = installer.resolve_source_path(&staging, "../../etc/passwd");
+        assert_eq!(res, staging_root.join("passwd"));
+
+        // Test absolute path within homebrew prefix is allowed
+        let res = installer.resolve_source_path(&staging, &format!("{}/bin/brew", prefix));
+        assert_eq!(res, PathBuf::from(format!("{}/bin/brew", prefix)));
+
+        // Test absolute path within staging root is allowed
+        let abs_in_staging = staging_root.join("foo/bar");
+        let res = installer.resolve_source_path(&staging, abs_in_staging.to_str().unwrap());
+        assert_eq!(res, abs_in_staging);
+    }
+
+    #[test]
+    fn user_bin_dir_matches_documented_path() {
+        let user_bin_dir = CaskInstaller::user_bin_dir().unwrap();
+        assert_eq!(
+            user_bin_dir,
+            dirs::home_dir().unwrap().join(".local/wax/bin")
+        );
     }
 }

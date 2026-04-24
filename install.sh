@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-REPO="semitechnological/wax"
+REPO="plyght/wax"
 INSTALL_DIR="${WAX_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${WAX_VERSION:-}"
 
@@ -75,7 +75,7 @@ install_from_release() {
   BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
   TMP="$(mktemp)"
   TMP_SHA="$(mktemp)"
-  trap 'rm -f "$TMP" "$TMP_SHA"' EXIT
+  trap 'rm -f "${TMP:-}" "${TMP_SHA:-}"' EXIT
 
   if command -v curl &>/dev/null; then
     curl -fsSL --progress-bar "${BASE_URL}/${ASSET}" -o "$TMP"

@@ -340,6 +340,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
         &archive_path,
         Some(&pb),
         conns,
+        None,
     )
     .await?;
     pb.finish_and_clear();
