@@ -364,11 +364,15 @@ enum SystemAction {
     Install {
         #[arg(required = true, help = "Package name(s) to install")]
         packages: Vec<String>,
+        #[arg(long, help = "Download and extract packages directly from registry (nix-like, bypasses host PM)")]
+        direct: bool,
     },
     #[command(about = "Declare and install packages (adds to desired state)")]
     Add {
         #[arg(required = true, help = "Package name(s) to add")]
         packages: Vec<String>,
+        #[arg(long, help = "Download and extract packages directly from registry (nix-like, bypasses host PM)")]
+        direct: bool,
     },
     #[command(about = "Remove packages and drop from desired state")]
     Remove {
@@ -661,14 +665,26 @@ async fn main() -> Result<()> {
                 Some(mgr) => mgr.upgrade_all().await,
                 None => handle_system_upgrade().await,
             },
-            SystemAction::Install { packages } => match system::SystemManager::detect().await? {
-                Some(mgr) => mgr.install(&packages).await,
+            SystemAction::Install { packages, direct } => match system::SystemManager::detect().await? {
+                Some(mgr) => {
+                    if direct {
+                        mgr.install_direct(&packages, false).await
+                    } else {
+                        mgr.install(&packages).await
+                    }
+                }
                 None => Err(crate::error::WaxError::PlatformNotSupported(
                     "No supported system package manager found".to_string(),
                 )),
             },
-            SystemAction::Add { packages } => match system::SystemManager::detect().await? {
-                Some(mgr) => mgr.add(&packages).await,
+            SystemAction::Add { packages, direct } => match system::SystemManager::detect().await? {
+                Some(mgr) => {
+                    if direct {
+                        mgr.install_direct(&packages, true).await
+                    } else {
+                        mgr.add(&packages).await
+                    }
+                }
                 None => Err(crate::error::WaxError::PlatformNotSupported(
                     "No supported system package manager found".to_string(),
                 )),

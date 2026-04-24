@@ -35,6 +35,7 @@ impl AptRegistry {
         Self::new("http://archive.ubuntu.com/ubuntu", "jammy")
     }
 
+    #[allow(dead_code)]
     pub fn debian_default() -> Self {
         Self::new("http://deb.debian.org/debian", "bookworm")
     }

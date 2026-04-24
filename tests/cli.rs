@@ -273,6 +273,78 @@ fn unknown_subcommand_exits_nonzero() {
     assert!(!out.status.success());
 }
 
+// ── system subcommand smoke tests ────────────────────────────────────────────
+
+#[test]
+fn system_help_exits_zero() {
+    let out = wax().args(["system", "--help"]).output().unwrap();
+    assert!(out.status.success(), "wax system --help failed: {:?}", out.status.code());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for sub in &["install", "add", "remove", "sync", "status", "generations", "rollback", "upgrade"] {
+        assert!(stdout.contains(sub), "system help missing '{sub}': {stdout}");
+    }
+}
+
+#[test]
+fn system_status_exits_zero_or_shows_no_pm() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = wax()
+        .env("WAX_CACHE_DIR", tmp.path())
+        .args(["system", "status"])
+        .output()
+        .unwrap();
+    // Should either succeed or print "no supported system package manager found"
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success() || stderr.contains("no supported system package manager"),
+        "wax system status failed unexpectedly: {stderr}"
+    );
+}
+
+#[test]
+fn system_generations_exits_zero_or_shows_no_pm() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = wax()
+        .env("WAX_CACHE_DIR", tmp.path())
+        .args(["system", "generations"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success() || stderr.contains("no supported system package manager"),
+        "wax system generations failed unexpectedly: {stderr}"
+    );
+}
+
+#[test]
+fn features_flag_exits_zero() {
+    let out = wax().arg("features").output().unwrap();
+    assert!(out.status.success(), "wax features failed: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn outdated_exits_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = wax()
+        .env("WAX_CACHE_DIR", tmp.path())
+        .arg("outdated")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "wax outdated failed: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+#[test]
+fn link_help_exits_zero() {
+    let out = wax().args(["link", "--help"]).output().unwrap();
+    assert!(out.status.success(), "wax link --help failed: {:?}", out.status.code());
+}
+
+#[test]
+fn unlink_help_exits_zero() {
+    let out = wax().args(["unlink", "--help"]).output().unwrap();
+    assert!(out.status.success(), "wax unlink --help failed: {:?}", out.status.code());
+}
+
 // ── network integration tests (skipped unless INTEGRATION=1) ─────────────────
 
 fn integration_enabled() -> bool {

@@ -17,6 +17,7 @@ pub struct DistroInfo {
     pub id: String,
     pub name: String,
     pub version: String,
+    #[allow(dead_code)]
     pub format: PackageFormat,
 }
 

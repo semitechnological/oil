@@ -10,6 +10,7 @@ pub mod extractor;
 pub mod generations;
 pub mod installer;
 pub mod manifest;
+#[allow(dead_code)]
 pub mod query;
 pub mod registry;
 pub mod resolver;
@@ -18,7 +19,10 @@ pub mod state;
 use crate::error::{Result, WaxError};
 use crate::system::distro::DistroInfo;
 use crate::system::generations::{Generation, GenerationManager};
+use crate::system::installer::SystemInstaller;
 use crate::system::manifest::FileManifest;
+use crate::system::registry::{PackageIndex, PackageMetadata};
+use crate::system::resolver::Resolver;
 use crate::system::state::SystemState;
 use crate::system_pm::SystemPm;
 use console::style;
@@ -28,6 +32,7 @@ pub struct SystemManager {
     pm: SystemPm,
     platform_label: String,
     gen_mgr: GenerationManager,
+    installer: SystemInstaller,
 }
 
 impl SystemManager {
@@ -53,6 +58,7 @@ impl SystemManager {
             pm,
             platform_label,
             gen_mgr,
+            installer: SystemInstaller::new(),
         }))
     }
 
@@ -328,6 +334,106 @@ impl SystemManager {
         Ok(())
     }
 
+    /// Install packages directly from distro registry (bypass host PM).
+    pub async fn install_direct(&self, packages: &[String], declare: bool) -> Result<()> {
+        if packages.is_empty() {
+            return Ok(());
+        }
+
+        let index = self.load_registry().await?;
+        let resolver = Resolver::new(&index);
+        let resolved = resolver.resolve(packages)?;
+
+        if resolved.is_empty() {
+            return Err(WaxError::InstallError(format!(
+                "no packages found in registry for: {}",
+                packages.join(", ")
+            )));
+        }
+
+        let names: Vec<String> = resolved.iter().map(|p| p.name.clone()).collect();
+        println!(
+            "{} direct-installing {} package(s) via nix-like installer",
+            style("→").cyan(),
+            style(names.len()).bold()
+        );
+        for pkg in &resolved {
+            println!("  {} {}", style("+").green(), style(&pkg.name).magenta());
+        }
+
+        self.snapshot(&format!(
+            "pre-direct-{} {}",
+            if declare { "add" } else { "install" },
+            packages.join(" ")
+        ))
+        .await?;
+
+        let prefix = SystemInstaller::install_prefix();
+        let metadata: Vec<PackageMetadata> =
+            resolved.iter().map(|&p| p.clone()).collect();
+        let installed = self.installer.install_packages(&metadata, &prefix).await?;
+
+        let mut state = SystemState::load().await?;
+        if declare {
+            for pkg in packages {
+                state.declare(pkg);
+            }
+        }
+        for (name, version) in installed {
+            state.mark_installed(&name, Some(version), declare || state.is_declared(&name));
+        }
+        self.refresh_tracked_state(&mut state).await?;
+        state.save().await?;
+
+        let gen = self
+            .gen_mgr
+            .create(
+                &format!(
+                    "direct-{} {}",
+                    if declare { "add" } else { "install" },
+                    packages.join(" ")
+                ),
+                state.installed_packages(),
+            )
+            .await?;
+
+        println!(
+            "  {} generation {} created",
+            style("✓").green(),
+            style(gen.id).bold()
+        );
+        Ok(())
+    }
+
+    async fn load_registry(&self) -> Result<PackageIndex> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .map_err(|e| WaxError::InstallError(format!("HTTP client: {}", e)))?;
+
+        match self.pm {
+            SystemPm::Apt => {
+                let reg = crate::system::registry::apt::AptRegistry::ubuntu_default();
+                reg.load(&client).await
+            }
+            SystemPm::Dnf | SystemPm::Yum => {
+                let reg = crate::system::registry::dnf::DnfRegistry::fedora_default();
+                reg.load(&client).await
+            }
+            SystemPm::Pacman => {
+                let reg = crate::system::registry::pacman::PacmanRegistry::arch_default();
+                reg.load(&client).await
+            }
+            SystemPm::Apk => {
+                let reg = crate::system::registry::apk::ApkRegistry::alpine_default();
+                reg.load(&client).await
+            }
+            _ => Err(WaxError::PlatformNotSupported(
+                "direct install not supported for this package manager".into(),
+            )),
+        }
+    }
+
     pub async fn status(&self) -> Result<()> {
         let mut state = SystemState::load().await?;
         self.refresh_tracked_state(&mut state).await?;
@@ -449,7 +555,7 @@ impl SystemManager {
                 }
 
                 let mut dirs = manifest.dirs.clone();
-                dirs.sort_by(|a, b| b.components().count().cmp(&a.components().count()));
+                dirs.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
                 for dir in &dirs {
                     let _ = tokio::fs::remove_dir(dir).await;
                 }

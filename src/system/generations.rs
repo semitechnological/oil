@@ -127,7 +127,21 @@ impl GenerationManager {
             tokio::fs::remove_file(&tmp).await?;
         }
         #[cfg(unix)]
-        tokio::fs::symlink(path.file_name().unwrap(), &tmp).await?;
+        {
+            tokio::fs::symlink(path.file_name().unwrap(), &tmp).await?;
+        }
+        #[cfg(windows)]
+        {
+            // On Windows, use a junction for directories or a file copy as fallback.
+            // Since generations are directories, we use std::os::windows::fs::symlink_dir.
+            let target = path.file_name().unwrap();
+            tokio::fs::symlink_dir(target, &tmp).await.map_err(|e| {
+                WaxError::InstallError(format!(
+                    "Failed to create junction for generation symlink: {}",
+                    e
+                ))
+            })?;
+        }
         tokio::fs::rename(&tmp, &link).await?;
 
         Ok(gen)

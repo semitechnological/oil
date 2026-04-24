@@ -11,7 +11,7 @@ use crate::discovery::discover_manually_installed_casks;
 use crate::error::{Result, WaxError};
 use crate::formula_parser::{BuildSystem, FormulaParser};
 use crate::install::{create_symlinks, InstallMode, InstallState, InstalledPackage};
-use crate::signal::{check_cancelled, CriticalSection};
+use crate::signal::check_cancelled;
 use crate::system_pm::SystemPm;
 use crate::tap::TapManager;
 use crate::ui::{
@@ -21,7 +21,7 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use sha2::Digest;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
