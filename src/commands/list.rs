@@ -75,24 +75,30 @@ async fn collect_installed_rows() -> Result<Vec<InstalledRow>> {
                     }
                 }
 
-                let from_source = installed_packages
-                    .get(&package_name)
-                    .map(|p| p.from_source)
-                    .unwrap_or(false);
+                let pkg_meta = installed_packages.get(&package_name);
+                let from_source = pkg_meta.map(|p| p.from_source).unwrap_or(false);
+                let pinned = pkg_meta.map(|p| p.pinned).unwrap_or(false);
 
                 let version_str = versions.join(", ");
+                let pin_marker = if pinned {
+                    format!(" {}", style("(pinned)").cyan())
+                } else {
+                    String::new()
+                };
                 let line = if from_source {
                     format!(
-                        "{} {} {}",
+                        "{} {} {}{}",
                         style(&package_name).magenta(),
                         style(&version_str).dim(),
-                        style("(source)").yellow()
+                        style("(source)").yellow(),
+                        pin_marker
                     )
                 } else {
                     format!(
-                        "{} {}",
+                        "{} {}{}",
                         style(&package_name).magenta(),
-                        style(&version_str).dim()
+                        style(&version_str).dim(),
+                        pin_marker
                     )
                 };
 
@@ -298,8 +304,45 @@ async fn run_interactive_list(cache: &Cache, initial_query: Option<String>) -> R
     Ok(())
 }
 
+/// Plain-text listing of packages that have upgrades available (winget-style `--upgradable`).
+async fn list_upgradable(cache: &Cache) -> Result<()> {
+    let outdated = get_outdated_packages(cache).await?;
+    if outdated.is_empty() {
+        println!("all packages are up to date");
+        return Ok(());
+    }
+    println!();
+    for pkg in &outdated {
+        let tag = if pkg.is_cask {
+            format!(" {}", style("(cask)").yellow())
+        } else {
+            String::new()
+        };
+        println!(
+            "{}{} {} → {}",
+            style(&pkg.name).magenta(),
+            tag,
+            style(&pkg.installed_version).dim(),
+            style(&pkg.latest_version).green()
+        );
+    }
+    println!(
+        "\n{} package{} can be upgraded",
+        style(outdated.len()).cyan(),
+        if outdated.len() == 1 { "" } else { "s" }
+    );
+    Ok(())
+}
+
 #[instrument(skip(cache))]
-pub async fn list(cache: &Cache, query: Option<String>) -> Result<()> {
+pub async fn list(
+    cache: &Cache,
+    query: Option<String>,
+    upgradable: bool,
+) -> Result<()> {
+    if upgradable {
+        return list_upgradable(cache).await;
+    }
     let rows = collect_installed_rows().await?;
 
     if rows.is_empty() {

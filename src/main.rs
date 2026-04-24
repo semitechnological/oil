@@ -4,12 +4,17 @@ mod builder;
 mod cache;
 mod cask;
 mod commands;
+mod chocolatey;
 mod deps;
 mod discovery;
+mod ecosystem_install;
 mod error;
 mod formula_parser;
 mod install;
 mod lockfile;
+mod package_spec;
+mod remote_search;
+mod scoop;
 mod signal;
 mod sudo;
 mod system;
@@ -17,10 +22,11 @@ mod system_pm;
 mod tap;
 mod ui;
 mod version;
+mod winget_install;
 
 use api::ApiClient;
 use cache::Cache;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use error::Result;
 use tracing::Level;
@@ -31,9 +37,14 @@ use version::WAX_VERSION;
 #[command(name = "wax")]
 #[command(version = WAX_VERSION)]
 #[command(about = format!("wax v{} - the fast homebrew-compat package manager", WAX_VERSION), long_about = None)]
+#[command(subcommand_required = false)]
 struct Cli {
+    /// Print wax version, paths, and active taps (read-only; winget-style --info)
+    #[arg(long, global = true)]
+    info: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     #[arg(short, long, global = true)]
     verbose: bool,
@@ -62,7 +73,9 @@ enum Commands {
         force: bool,
     },
 
-    #[command(about = "Search formulae and casks  [alias: s, find]")]
+    #[command(
+        about = "Search formulae, casks, and Windows catalogues (scoop/choco/winget). Prefix scoop/, choco/, chocolatey/, winget/, or brew/ to filter  [alias: s, find]"
+    )]
     #[command(visible_alias = "s")]
     #[command(alias = "find")]
     Search { query: String },
@@ -80,13 +93,21 @@ enum Commands {
     List {
         #[arg(help = "Filter: pre-fills the interactive search (TTY), or limits printed output")]
         query: Option<String>,
+        #[arg(
+            long,
+            visible_alias = "updates",
+            help = "Only show packages with available updates"
+        )]
+        upgradable: bool,
     },
 
-    #[command(about = "Install one or more formulae or casks  [alias: i, add]")]
+    #[command(
+        about = "Install formulae/casks or Windows portables (auto-picks fastest source on Windows). Use scoop/pkg, choco/pkg, winget/Id.SubId, or brew/pkg  [alias: i, add]"
+    )]
     #[command(visible_alias = "i")]
     #[command(alias = "add")]
     Install {
-        #[arg(help = "Package name(s) to install (syncs from lockfile if omitted)")]
+        #[arg(help = "Package name(s); optional prefix scoop/, choco/, chocolatey/, winget/, brew/ (Windows auto-resolve if omitted)")]
         packages: Vec<String>,
         #[arg(long)]
         dry_run: bool,
@@ -214,10 +235,14 @@ enum Commands {
         installed: bool,
     },
 
-    #[command(about = "Pin a formula to its current version")]
+    #[command(about = "Pin a formula to its current version  [alias: pin list]")]
     Pin {
-        #[arg(required = true)]
+        #[command(subcommand)]
+        pin_cmd: Option<PinCmd>,
+        #[arg(help = "Package name(s) to pin (when not using `wax pin list`)")]
         packages: Vec<String>,
+        #[arg(long, help = "List all pinned packages")]
+        list: bool,
     },
 
     #[command(about = "Unpin a formula to allow upgrades")]
@@ -225,6 +250,12 @@ enum Commands {
         #[arg(required = true)]
         packages: Vec<String>,
     },
+
+    #[command(about = "List experimental feature flags")]
+    Features,
+
+    #[command(about = "Show wax installation info (paths, version, active taps)")]
+    WaxInfo,
 
     #[command(about = "Generate lockfile from installed packages")]
     Lock,
@@ -360,6 +391,12 @@ enum ServicesAction {
 }
 
 #[derive(Subcommand)]
+enum PinCmd {
+    #[command(about = "List all pinned packages", visible_alias = "ls")]
+    List,
+}
+
+#[derive(Subcommand)]
 enum TapAction {
     #[command(about = "Add a custom tap")]
     Add {
@@ -432,10 +469,20 @@ async fn main() -> Result<()> {
     signal::install_handler();
     init_logging(cli.verbose)?;
 
+    if cli.info {
+        return commands::wax_info::wax_info();
+    }
+
+    let Some(command) = cli.command else {
+        let mut cmd = Cli::command();
+        let _ = cmd.print_help();
+        std::process::exit(2);
+    };
+
     let api_client = ApiClient::new();
     let cache = Cache::new()?;
 
-    let result = match cli.command {
+    let result = match command {
         Commands::Update {
             update_self,
             nightly,
@@ -456,7 +503,10 @@ async fn main() -> Result<()> {
         Commands::Info { formula, cask } => {
             commands::info::info(&api_client, &cache, &formula, cask).await
         }
-        Commands::List { query } => commands::list::list(&cache, query).await,
+        Commands::List {
+            query,
+            upgradable,
+        } => commands::list::list(&cache, query, upgradable).await,
         Commands::Install {
             packages,
             dry_run,
@@ -611,7 +661,22 @@ async fn main() -> Result<()> {
             tree,
             installed,
         } => commands::show_deps::deps(&cache, &formula, tree, installed).await,
-        Commands::Pin { packages } => commands::pin::pin(&packages).await,
+        Commands::Pin {
+            pin_cmd,
+            packages,
+            list,
+        } => {
+            if list || matches!(pin_cmd, Some(PinCmd::List)) {
+                commands::pin::list_pinned().await
+            } else if packages.is_empty() {
+                Err(crate::error::WaxError::InvalidInput(
+                    "specify package(s) to pin, or run `wax pin list` / `wax pin --list`"
+                        .to_string(),
+                ))
+            } else {
+                commands::pin::pin(&packages).await
+            }
+        }
         Commands::Unpin { packages } => commands::pin::unpin(&packages).await,
         Commands::Lock => commands::lock::lock(&cache).await,
         Commands::Sync => commands::sync::sync(&cache).await,
@@ -643,6 +708,8 @@ async fn main() -> Result<()> {
             commands::info::info(&api_client, &cache, &formula, false).await
         }
         Commands::Audit => commands::audit::audit(&cache).await,
+        Commands::Features => commands::features::features(),
+        Commands::WaxInfo => commands::wax_info::wax_info(),
     };
 
     if let Err(e) = result {

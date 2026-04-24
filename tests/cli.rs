@@ -33,6 +33,21 @@ fn version_output_contains_version_string() {
 }
 
 #[test]
+fn info_flag_exits_zero() {
+    let out = wax().arg("--info").output().unwrap();
+    assert!(
+        out.status.success(),
+        "wax --info failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Version:") && stdout.contains("Prefix:"),
+        "expected paths in --info output: {stdout}"
+    );
+}
+
+#[test]
 fn help_flag_exits_zero() {
     let out = wax().arg("--help").output().unwrap();
     assert!(out.status.success());
@@ -210,12 +225,9 @@ fn tap_list_exits_zero() {
 #[test]
 fn install_no_args_does_not_panic() {
     let out = wax().arg("install").output().unwrap();
-    // Should exit with non-zero (usage error), not SIGSEGV/SIGABRT.
+    // `wax install` with no args now syncs from lockfile (like npm install).
+    // It may succeed (no lockfile → no-op) or fail gracefully; either is fine.
     let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        !out.status.success(),
-        "expected non-zero exit for `wax install` with no args"
-    );
     // Must not produce a Rust panic message.
     assert!(
         !stderr.contains("thread 'main' panicked"),

@@ -2,7 +2,10 @@ use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::error::Result;
 use crate::install::InstallState;
+use crate::package_spec::Ecosystem;
+use crate::remote_search::{collect_remote_hits, dedupe_remote_by_speed, print_remote_hits};
 use console::style;
+use std::collections::HashSet;
 use tracing::instrument;
 
 fn calculate_match_score(name: &str, desc: Option<&str>, query: &str) -> Option<i32> {
@@ -67,6 +70,13 @@ fn calculate_match_score(name: &str, desc: Option<&str>, query: &str) -> Option<
 
 #[instrument(skip(cache))]
 pub async fn search(cache: &Cache, query: &str) -> Result<()> {
+    let (eco_filter, q) = crate::package_spec::parse_search_query(query);
+    let q = q.trim();
+    if q.is_empty() {
+        println!("empty search query");
+        return Ok(());
+    }
+
     cache.ensure_fresh().await?;
 
     let formulae = cache.load_all_formulae().await?;
@@ -76,6 +86,8 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
     let installed_packages = state.load().await?;
     let cask_state = CaskState::new()?;
     let installed_casks = cask_state.load().await?;
+
+    let brew_catalog = eco_filter.is_none() || eco_filter == Some(Ecosystem::Brew);
 
     let core_formulae: Vec<_> = formulae
         .iter()
@@ -87,41 +99,47 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
         .filter(|f| f.full_name.contains('/') && !f.full_name.starts_with("homebrew/"))
         .collect();
 
-    let mut formula_matches: Vec<_> = core_formulae
-        .iter()
-        .filter_map(|f| {
-            calculate_match_score(&f.name, f.desc.as_deref(), query).map(|score| (f, score))
-        })
-        .collect();
+    let mut formula_matches: Vec<_> = Vec::new();
+    let mut tap_matches: Vec<_> = Vec::new();
+    let mut cask_matches: Vec<_> = Vec::new();
 
-    let mut tap_matches: Vec<_> = tap_formulae
-        .iter()
-        .filter_map(|f| {
-            let name_score = calculate_match_score(&f.name, f.desc.as_deref(), query);
-            let full_name_score = calculate_match_score(&f.full_name, f.desc.as_deref(), query);
-            name_score.or(full_name_score).map(|score| (f, score))
-        })
-        .collect();
+    if brew_catalog {
+        formula_matches = core_formulae
+            .iter()
+            .filter_map(|f| {
+                calculate_match_score(&f.name, f.desc.as_deref(), q).map(|score| (f, score))
+            })
+            .collect();
 
-    let mut cask_matches: Vec<_> = casks
-        .iter()
-        .filter_map(|c| {
-            let token_score = calculate_match_score(&c.token, c.desc.as_deref(), query);
-            let name_score = c
-                .name
-                .iter()
-                .filter_map(|n| calculate_match_score(n, c.desc.as_deref(), query))
-                .max();
-            token_score.or(name_score).map(|score| (c, score))
-        })
-        .collect();
+        tap_matches = tap_formulae
+            .iter()
+            .filter_map(|f| {
+                let name_score = calculate_match_score(&f.name, f.desc.as_deref(), q);
+                let full_name_score = calculate_match_score(&f.full_name, f.desc.as_deref(), q);
+                name_score.or(full_name_score).map(|score| (f, score))
+            })
+            .collect();
 
-    formula_matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
-    tap_matches.sort_by(|a, b| {
-        b.1.cmp(&a.1)
-            .then_with(|| a.0.full_name.cmp(&b.0.full_name))
-    });
-    cask_matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.token.cmp(&b.0.token)));
+        cask_matches = casks
+            .iter()
+            .filter_map(|c| {
+                let token_score = calculate_match_score(&c.token, c.desc.as_deref(), q);
+                let name_score = c
+                    .name
+                    .iter()
+                    .filter_map(|n| calculate_match_score(n, c.desc.as_deref(), q))
+                    .max();
+                token_score.or(name_score).map(|score| (c, score))
+            })
+            .collect();
+
+        formula_matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
+        tap_matches.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| a.0.full_name.cmp(&b.0.full_name))
+        });
+        cask_matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.token.cmp(&b.0.token)));
+    }
 
     let formula_matches: Vec<_> = formula_matches.iter().take(20).map(|(f, _)| f).collect();
     let tap_matches: Vec<_> = tap_matches.iter().take(10).map(|(f, _)| f).collect();
@@ -129,12 +147,39 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
 
     let total = formula_matches.len() + tap_matches.len() + cask_matches.len();
 
-    if total == 0 {
+    let brew_blocklist: HashSet<String> = formulae
+        .iter()
+        .map(|f| f.name.to_lowercase())
+        .chain(casks.iter().map(|c| c.token.to_lowercase()))
+        .collect();
+
+    let include_scoop = eco_filter.map(|e| e == Ecosystem::Scoop).unwrap_or(true);
+    let include_choco = eco_filter.map(|e| e == Ecosystem::Chocolatey).unwrap_or(true);
+    let include_winget = eco_filter.map(|e| e == Ecosystem::Winget).unwrap_or(true);
+
+    let mut remote_hits = collect_remote_hits(cache, q, include_scoop, include_choco, include_winget).await?;
+    remote_hits.retain(|h| !brew_blocklist.contains(&h.id.to_lowercase()));
+    remote_hits = dedupe_remote_by_speed(remote_hits);
+
+    if total == 0 && remote_hits.is_empty() {
         println!("no results for '{}'", query);
         return Ok(());
     }
 
-    println!();
+    if !brew_catalog {
+        println!(
+            "{}",
+            style(format!(
+                "Filtered to {} only (drop the prefix to search every catalogue)",
+                eco_filter.unwrap().label()
+            ))
+            .dim()
+        );
+    }
+
+    if total > 0 {
+        println!();
+    }
     for formula in &formula_matches {
         let desc = formula.desc.as_deref().unwrap_or("");
         let installed_suffix = if installed_packages.contains_key(&formula.name) {
@@ -240,7 +285,17 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
             }
         ));
     }
-    println!("\n{}", style(parts.join(", ")).dim());
+    if total > 0 {
+        println!("\n{}", style(parts.join(", ")).dim());
+    }
+
+    print_remote_hits(&remote_hits);
+    if !remote_hits.is_empty() && std::env::var("GITHUB_TOKEN").map(|v| v.is_empty()).unwrap_or(true) {
+        println!(
+            "\n{}",
+            style("Tip: set GITHUB_TOKEN for broader winget-pkgs code search in unified mode.").dim()
+        );
+    }
 
     Ok(())
 }

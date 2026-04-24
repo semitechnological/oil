@@ -41,7 +41,6 @@ pub enum WaxError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    #[allow(dead_code)]
     #[error("Operation not supported on this platform: {0}")]
     PlatformNotSupported(String),
 

@@ -55,3 +55,5 @@ zstd = "0.13"
 xz2 = "0.1"
 bzip2 = "0.4"
 quick-xml = { version = "0.37", features = ["async-tokio"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+serde_yaml = "0.9"

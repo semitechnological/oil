@@ -3,6 +3,32 @@ use crate::error::{Result, WaxError};
 use crate::install::InstallState;
 use console::style;
 
+pub async fn list_pinned() -> Result<()> {
+    let state = InstallState::new()?;
+    state.sync_from_cellar().await.ok();
+    let installed = state.load().await?;
+
+    let mut pinned: Vec<_> = installed.values().filter(|p| p.pinned).collect();
+
+    if pinned.is_empty() {
+        println!("no pinned packages");
+        return Ok(());
+    }
+
+    pinned.sort_by(|a, b| a.name.cmp(&b.name));
+    println!();
+    for pkg in &pinned {
+        println!(
+            "{} {}",
+            style(&pkg.name).magenta(),
+            style(&pkg.version).dim()
+        );
+    }
+    println!("\n{} pinned", style(pinned.len()).cyan());
+
+    Ok(())
+}
+
 pub async fn pin(packages: &[String]) -> Result<()> {
     if packages.is_empty() {
         return Err(WaxError::InvalidInput("No packages specified".to_string()));

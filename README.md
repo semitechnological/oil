@@ -53,7 +53,31 @@ cd wax
 
 To **force** a pre-built release while standing in a clone, set `WAX_USE_RELEASE=1` before `./install.sh`.
 
-GitHub Releases ship **Linux** and **macOS** binaries (`wax-linux-*`, `wax-macos-*`) with `.sha256` sidecars when published by CI.
+GitHub Releases ship **Linux**, **macOS**, and **Windows** binaries (`wax-linux-*`, `wax-macos-*`, `wax-windows-*.exe`) with `.sha256` sidecars when published by CI.
+
+**Windows one-liner** — downloads `wax-windows-x64.exe` or `wax-windows-arm64.exe` from GitHub Releases (pin with `WAX_VERSION`):
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+irm https://raw.githubusercontent.com/semitechnological/wax/master/install.ps1 | iex
+```
+
+Installs to `%USERPROFILE%\.local\bin\wax.exe` unless you set `WAX_INSTALL_DIR`. To avoid changing policy, clone the repo and run `.\install.ps1` from that folder instead.
+
+**From a git clone on Windows:**
+
+```powershell
+git clone https://github.com/semitechnological/wax.git
+cd wax
+.\install.ps1
+```
+
+To **force** a release download while in a clone: `$env:WAX_USE_RELEASE = '1'; .\install.ps1`. Or build manually with [Rust](https://rustup.rs/):
+
+```powershell
+cargo build --release
+.\target\release\wax.exe --help
+```
 
 **Homebrew tap** — builds from source via cargo:
 

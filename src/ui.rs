@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::sudo;
 use indicatif::{ProgressBar, ProgressStyle};
-use std::path::PathBuf;
+use std::path::Path;
 use std::time::Duration;
 use tracing::debug;
 
@@ -12,7 +12,7 @@ pub const PROGRESS_BAR_PREFIX_TEMPLATE: &str =
     "{prefix:.bold} {bar:40.cyan/blue} {bytes}/{total_bytes} {bytes_per_sec}  eta {eta}";
 pub const SPINNER_TICK_CHARS: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
 
-pub fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> Result<()> {
+pub fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     match copy_dir_all_inner(src, dst) {
         Ok(()) => Ok(()),
         Err(ref e) if sudo::is_permission_error(e) || sudo::is_file_exists_error(e) => {
@@ -28,7 +28,7 @@ pub fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     }
 }
 
-fn copy_dir_all_inner(src: &PathBuf, dst: &PathBuf) -> Result<()> {
+fn copy_dir_all_inner(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
 
     for entry in std::fs::read_dir(src)? {

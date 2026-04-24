@@ -21,7 +21,7 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use sha2::Digest;
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Semaphore;
@@ -533,6 +533,31 @@ async fn install_impl(
         return install_casks(cache, package_names, dry_run, quiet).await;
     }
 
+    let resolved_formula_packages: Vec<String> = {
+        let mut v = Vec::new();
+        for name in package_names {
+            let spec = crate::package_spec::parse_package_spec(name);
+            if spec.force.is_none() && (name.contains('/') || name.contains('@')) {
+                v.push(name.clone());
+                continue;
+            }
+            if spec.force == Some(crate::package_spec::Ecosystem::Brew) {
+                v.push(spec.name);
+                continue;
+            }
+            if crate::ecosystem_install::install_one_qualified(cache, name, dry_run, false).await?
+            {
+                continue;
+            }
+            v.push(spec.name);
+        }
+        v
+    };
+
+    if resolved_formula_packages.is_empty() {
+        return Ok(());
+    }
+
     let install_mode = match InstallMode::from_flags(user, global)? {
         Some(mode) => mode,
         None => InstallMode::detect(),
@@ -560,8 +585,8 @@ async fn install_impl(
     let mut errors = Vec::new();
     let mut detected_casks: Vec<String> = Vec::new();
 
-    for package_name in package_names {
-        if installed.contains(package_name) {
+    for package_name in &resolved_formula_packages {
+        if installed.contains(package_name.as_str()) {
             already_installed.push(package_name.clone());
             continue;
         }
@@ -692,9 +717,9 @@ async fn install_impl(
         return Ok(());
     }
 
-    let requested: Vec<&str> = package_names
+    let requested: Vec<&str> = resolved_formula_packages
         .iter()
-        .filter(|p| !already_installed.contains(p) && !errors.iter().any(|(e, _)| e == *p))
+        .filter(|p| !already_installed.contains(*p) && !errors.iter().any(|(e, _)| e == *p))
         .map(|s| s.as_str())
         .collect();
     let package_list = requested.join(", ");
@@ -1051,7 +1076,7 @@ async fn install_impl(
     let installed_names: std::collections::HashSet<String> =
         state_snapshot.keys().cloned().collect();
 
-    for pkg_name in package_names {
+    for pkg_name in &resolved_formula_packages {
         if pkg_name.ends_with("-full") {
             let base_name = pkg_name.trim_end_matches("-full");
             if !installed_names.contains(base_name) {
@@ -1085,6 +1110,186 @@ async fn install_impl(
     Ok(())
 }
 
+/// Result of copying a bottle into the Cellar (per-formula prefix). Safe to run in parallel
+/// for different formulae; symlinks and `installed.json` updates must run sequentially after.
+struct PreparedBottleCellar {
+    name: String,
+    cellar_version: String,
+    bottle_sha: String,
+    bottle_rebuild: u32,
+}
+
+fn detect_cellar_version_from_extract(
+    name: &str,
+    version: &str,
+    extract_dir: &Path,
+    bottle_rebuild: u32,
+) -> String {
+    let name_dir = extract_dir.join(name);
+    if name_dir.exists() {
+        let mut found = None;
+        if let Ok(mut entries) = std::fs::read_dir(&name_dir) {
+            while let Some(Ok(entry)) = entries.next() {
+                let entry_name = entry.file_name().to_string_lossy().to_string();
+                if entry_name.starts_with(version) && entry.path().is_dir() {
+                    found = Some(entry_name);
+                    break;
+                }
+            }
+        }
+        return found.unwrap_or_else(|| {
+            if bottle_rebuild > 0 {
+                format!("{}_{}", version, bottle_rebuild)
+            } else {
+                version.to_string()
+            }
+        });
+    }
+    if bottle_rebuild > 0 {
+        format!("{}_{}", version, bottle_rebuild)
+    } else {
+        version.to_string()
+    }
+}
+
+/// Copy and relocate the bottle into `Cellar/<name>/<cellar_version>/` (parallel-safe across names).
+async fn prepare_bottle_cellar_to_prepared(
+    name: String,
+    version: String,
+    extract_dir: PathBuf,
+    bottle_sha: String,
+    bottle_rebuild: u32,
+    cellar: PathBuf,
+    install_mode: InstallMode,
+) -> Result<PreparedBottleCellar> {
+    check_cancelled()?;
+
+    let cellar_version = detect_cellar_version_from_extract(&name, &version, &extract_dir, bottle_rebuild);
+    let name_dir = extract_dir.join(&name);
+    let formula_cellar = cellar.join(&name).join(&cellar_version);
+
+    if formula_cellar.exists() {
+        tokio::fs::remove_dir_all(&formula_cellar)
+            .await
+            .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))?;
+    }
+    tokio::fs::create_dir_all(&formula_cellar)
+        .await
+        .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))?;
+
+    let actual_content_dir = name_dir.join(&cellar_version);
+    let formula_cellar_for_copy = formula_cellar.clone();
+    let extract_dir_for_copy = extract_dir.clone();
+    let name_dir_for_copy = name_dir.clone();
+
+    tokio::task::spawn_blocking(move || {
+        if actual_content_dir.exists() {
+            copy_dir_all(&actual_content_dir, &formula_cellar_for_copy)?;
+        } else if name_dir_for_copy.exists() {
+            copy_dir_all(&name_dir_for_copy, &formula_cellar_for_copy)?;
+        } else {
+            copy_dir_all(&extract_dir_for_copy, &formula_cellar_for_copy)?;
+        }
+        Ok::<(), WaxError>(())
+    })
+    .await
+    .map_err(|e| WaxError::InstallError(format!("cellar copy task: {}", e)))??;
+
+    check_cancelled()?;
+
+    let prefix = install_mode.prefix()?;
+    let default_prefix = if cfg!(target_os = "macos") {
+        "/opt/homebrew"
+    } else {
+        "/home/linuxbrew/.linuxbrew"
+    };
+    BottleDownloader::relocate_bottle(
+        &formula_cellar,
+        prefix.to_str().unwrap_or(default_prefix),
+    )?;
+    BottleDownloader::validate_runtime(&formula_cellar)?;
+
+    Ok(PreparedBottleCellar {
+        name,
+        cellar_version,
+        bottle_sha,
+        bottle_rebuild,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finalize_extracted_bottle_install(
+    prepared: &PreparedBottleCellar,
+    cellar: &Path,
+    install_mode: InstallMode,
+    platform: &str,
+    state: &InstallState,
+    quiet: bool,
+    multi: Option<&MultiProgress>,
+    existing_pb: Option<ProgressBar>,
+    print_success_line: bool,
+) -> Result<()> {
+    let name = prepared.name.as_str();
+    let cellar_version = prepared.cellar_version.as_str();
+
+    macro_rules! step {
+        ($msg:expr) => {
+            if !quiet {
+                if let Some(ref pb) = existing_pb {
+                    pb.set_message(format!("{} {}", style(name).magenta(), style($msg).dim()));
+                    pb.tick();
+                } else {
+                    let line = format!("  {} {}", style(name).magenta(), style($msg).dim());
+                    if let Some(ref m) = multi {
+                        let _ = m.println(&line);
+                    } else {
+                        println!("{}", line);
+                    }
+                }
+            }
+        };
+    }
+
+    step!("symlinking...");
+    create_symlinks(name, cellar_version, cellar, false, install_mode).await?;
+
+    if let Some(_formula) = state.load().await?.get(name) {
+        if let Ok(formulae) = state.load_formulae_from_cache().await {
+            if let Some(f) = formulae.iter().find(|f| f.name == name) {
+                if f.post_install_defined {
+                    let _ = postinstall_impl(name, install_mode, true).await;
+                }
+            }
+        }
+    }
+
+    let package = InstalledPackage {
+        name: prepared.name.clone(),
+        version: prepared.cellar_version.clone(),
+        platform: platform.to_string(),
+        install_date: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64,
+        install_mode,
+        from_source: false,
+        bottle_rebuild: prepared.bottle_rebuild,
+        bottle_sha256: Some(prepared.bottle_sha.clone()),
+        pinned: false,
+    };
+    state.add(package).await?;
+
+    if print_success_line && !quiet {
+        println!(
+            "+ {}@{}",
+            style(name).magenta(),
+            style(cellar_version).dim()
+        );
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn install_extracted_bottle(
     name: &str,
@@ -1101,13 +1306,7 @@ pub async fn install_extracted_bottle(
     existing_pb: Option<ProgressBar>,
 ) -> Result<()> {
     crate::signal::set_current_op(format!("installing {}", name));
-    let _critical = CriticalSection::new();
 
-    // Step messages are printed immediately (not via spinner) so they always
-    // show even when the operation completes in <80ms. When a MultiProgress
-    // is active we use multi.println() to avoid clobbering its render area;
-    // when an existing_pb is provided (reinstall path) we update its message
-    // so the single bar transitions from "downloading" to each install step.
     macro_rules! step {
         ($msg:expr) => {
             if !quiet {
@@ -1126,110 +1325,34 @@ pub async fn install_extracted_bottle(
         };
     }
     step!("resolving...");
+    step!("installing to Cellar...");
 
-    // Detect the actual version directory from what's in the extracted bottle.
-    // Homebrew bottles embed {version}_{rebuild} paths, but the API's rebuild
-    // field can lag behind. Scanning the extracted dir gives us the ground truth.
-    let name_dir = extract_dir.join(name);
-    let cellar_version: String = if name_dir.exists() {
-        let mut found = None;
-        if let Ok(mut entries) = std::fs::read_dir(&name_dir) {
-            while let Some(Ok(entry)) = entries.next() {
-                let entry_name = entry.file_name().to_string_lossy().to_string();
-                if entry_name.starts_with(version) && entry.path().is_dir() {
-                    found = Some(entry_name);
-                    break;
-                }
-            }
-        }
-        found.unwrap_or_else(|| {
-            if bottle_rebuild > 0 {
-                format!("{}_{}", version, bottle_rebuild)
-            } else {
-                version.to_string()
-            }
-        })
-    } else if bottle_rebuild > 0 {
-        format!("{}_{}", version, bottle_rebuild)
-    } else {
-        version.to_string()
-    };
-
-    let formula_cellar = cellar.join(name).join(&cellar_version);
-    if formula_cellar.exists() {
-        step!("cleaning old version...");
-        tokio::fs::remove_dir_all(&formula_cellar)
-            .await
-            .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))?;
-    }
-    tokio::fs::create_dir_all(&formula_cellar)
-        .await
-        .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))?;
-
-    step!("copying to cellar...");
-    let actual_content_dir = name_dir.join(&cellar_version);
-    if actual_content_dir.exists() {
-        copy_dir_all(&actual_content_dir, &formula_cellar)?;
-    } else if name_dir.exists() {
-        copy_dir_all(&name_dir, &formula_cellar)?;
-    } else {
-        copy_dir_all(&extract_dir.to_path_buf(), &formula_cellar)?;
-    }
-
-    step!("relocating...");
-    {
-        let prefix = install_mode.prefix()?;
-        let default_prefix = if cfg!(target_os = "macos") {
-            "/opt/homebrew"
-        } else {
-            "/home/linuxbrew/.linuxbrew"
-        };
-        BottleDownloader::relocate_bottle(
-            &formula_cellar,
-            prefix.to_str().unwrap_or(default_prefix),
-        )?;
-    }
-
-    step!("validating runtime...");
-    BottleDownloader::validate_runtime(&formula_cellar)?;
+    let prepared = prepare_bottle_cellar_to_prepared(
+        name.to_string(),
+        version.to_string(),
+        extract_dir.to_path_buf(),
+        bottle_sha,
+        bottle_rebuild,
+        cellar.to_path_buf(),
+        install_mode,
+    )
+    .await?;
 
     step!("symlinking...");
-    create_symlinks(name, &cellar_version, cellar, false, install_mode).await?;
-
-    if let Some(_formula) = state.load().await?.get(name) {
-        // Auto-run postinstall if possible
-        if let Ok(formulae) = state.load_formulae_from_cache().await {
-            if let Some(f) = formulae.iter().find(|f| f.name == name) {
-                if f.post_install_defined {
-                    let _ = postinstall_impl(name, install_mode, true).await;
-                }
-            }
-        }
-    }
-
-    let package = InstalledPackage {
-        name: name.to_string(),
-        version: cellar_version.clone(),
-        platform: platform.to_string(),
-        install_date: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64,
+    let print_success_line = !quiet && existing_pb.is_none();
+    let _critical = CriticalSection::new();
+    finalize_extracted_bottle_install(
+        &prepared,
+        cellar,
         install_mode,
-        from_source: false,
-        bottle_rebuild,
-        bottle_sha256: Some(bottle_sha),
-        pinned: false,
-    };
-    state.add(package).await?;
-
-    if !quiet && existing_pb.is_none() {
-        println!(
-            "+ {}@{}",
-            style(name).magenta(),
-            style(&cellar_version).dim()
-        );
-    }
+        platform,
+        state,
+        quiet,
+        multi,
+        existing_pb,
+        print_success_line,
+    )
+    .await?;
 
     Ok(())
 }
