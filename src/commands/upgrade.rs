@@ -59,18 +59,16 @@ pub async fn upgrade(cache: &Cache, packages: &[String], dry_run: bool) -> Resul
     if packages.is_empty() {
         upgrade_all(cache, dry_run, start).await
     } else {
+        let cask_state = CaskState::new()?;
+        let installed_casks = cask_state.load().await?;
         let mut failed_names = Vec::new();
         for package in packages {
             if let Err(e) = if package == "wax" {
                 upgrade_single(cache, package, dry_run).await
+            } else if installed_casks.contains_key(package) {
+                upgrade_cask_single(cache, package, dry_run).await
             } else {
-                let cask_state = CaskState::new()?;
-                let installed_casks = cask_state.load().await?;
-                if installed_casks.contains_key(package) {
-                    upgrade_cask_single(cache, package, dry_run).await
-                } else {
-                    upgrade_single(cache, package, dry_run).await
-                }
+                upgrade_single(cache, package, dry_run).await
             } {
                 eprintln!(
                     "{} {} failed: {}",
@@ -640,6 +638,18 @@ async fn upgrade_single(cache: &Cache, formula_name: &str, dry_run: bool) -> Res
     let latest_version = formula.full_version();
     let installed_version = &installed.version;
 
+    if is_same_or_newer(installed_version, &latest_version) {
+        println!(
+            "{} is already on the latest version ({}).",
+            style(formula_name).magenta(),
+            style(installed_version).dim()
+        );
+        if dry_run {
+            println!("\ndry run - no changes made");
+        }
+        return Ok(());
+    }
+
     if dry_run {
         println!(
             "{}: {} → {}",
@@ -688,6 +698,19 @@ async fn upgrade_cask_single(cache: &Cache, cask_name: &str, dry_run: bool) -> R
 
     let latest_version = &cask_details.version;
     let installed_version = &installed.version;
+
+    if is_same_or_newer(installed_version, latest_version) {
+        println!(
+            "{} {} is already on the latest version ({}).",
+            style(cask_name).magenta(),
+            style("(cask)").yellow(),
+            style(installed_version).dim()
+        );
+        if dry_run {
+            println!("\ndry run - no changes made");
+        }
+        return Ok(());
+    }
 
     if dry_run {
         println!(

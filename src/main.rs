@@ -36,7 +36,25 @@ use version::WAX_VERSION;
 fn should_refresh_state(command: &Commands) -> bool {
     !matches!(
         command,
-        Commands::Completions { .. } | Commands::__RefreshState
+        Commands::Completions { .. }
+            | Commands::__RefreshState
+            | Commands::Install { .. }
+            | Commands::InstallCask { .. }
+            | Commands::Uninstall { .. }
+            | Commands::Reinstall { .. }
+            | Commands::Postinstall { .. }
+            | Commands::Upgrade { .. }
+            | Commands::System { .. }
+            | Commands::Lock
+            | Commands::Sync
+            | Commands::Link { .. }
+            | Commands::Unlink { .. }
+            | Commands::Cleanup { .. }
+            | Commands::Pin { .. }
+            | Commands::Unpin { .. }
+            | Commands::Tap { repair: true, .. }
+            | Commands::Doctor { fix: true }
+            | Commands::Bundle { dry_run: false, .. }
     )
 }
 
@@ -47,7 +65,10 @@ async fn refresh_state_in_child_process() {
 
     let _ = std::process::Command::new(exe)
         .arg("__refresh_state")
-        .status();
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 #[derive(Parser)]
@@ -74,6 +95,10 @@ struct Cli {
 enum Commands {
     #[command(about = "Update formula index or wax itself")]
     Update {
+        #[arg(
+            help = "Optional shorthand: s/self for stable self-update, sn/self-nightly for GitHub HEAD"
+        )]
+        action: Option<String>,
         #[arg(
             short = 's',
             long = "self",
@@ -531,12 +556,28 @@ async fn main() -> Result<()> {
 
     let result = match command {
         Commands::Update {
-            update_self,
-            nightly,
+            action,
+            mut update_self,
+            mut nightly,
             force,
             clean,
             no_clean,
         } => {
+            if let Some(action) = action {
+                match action.as_str() {
+                    "s" | "self" => update_self = true,
+                    "sn" | "self-nightly" => {
+                        update_self = true;
+                        nightly = true;
+                    }
+                    other => {
+                        return Err(error::WaxError::InvalidInput(format!(
+                            "Unknown update shorthand '{other}' (use s/self or sn/self-nightly)"
+                        )));
+                    }
+                }
+            }
+
             if update_self {
                 if clean && no_clean {
                     return Err(error::WaxError::InvalidInput(
