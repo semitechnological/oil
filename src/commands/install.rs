@@ -192,6 +192,14 @@ async fn install_from_source_task(
 
     spinner.set_message("Building from source (this may take several minutes)...".to_string());
 
+    if parsed_formula.source.url.is_empty() {
+        spinner.finish_and_clear();
+        return Err(WaxError::BuildError(format!(
+            "Formula '{}' has no stable source URL; install it with --head",
+            formula.name
+        )));
+    }
+
     let temp_dir = TempDir::new()?;
     let source_tarball = temp_dir.path().join(format!(
         "{}-{}.tar.gz",
