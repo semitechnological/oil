@@ -150,7 +150,7 @@ pub async fn bundle(cache: &Cache, waxfile_path: Option<&str>, dry_run: bool) ->
             names.len()
         );
         match crate::commands::install::install(
-            cache, &names, false, false, false, false, false, false,
+            cache, &names, false, false, false, false, false, false, true,
         )
         .await
         {
@@ -167,7 +167,7 @@ pub async fn bundle(cache: &Cache, waxfile_path: Option<&str>, dry_run: bool) ->
         println!();
         println!("  {} installing {} casks", style("→").cyan(), names.len());
         match crate::commands::install::install(
-            cache, &names, false, true, false, false, false, false,
+            cache, &names, false, true, false, false, false, false, true,
         )
         .await
         {

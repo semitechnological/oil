@@ -493,6 +493,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                         &platform,
                         &install_state,
                         false,
+                        true,
                         Some(&multi),
                         Some(install_pb.clone()),
                     )

@@ -151,6 +151,8 @@ enum Commands {
             help = "Install the HEAD version (clones git repo, builds from source)"
         )]
         head: bool,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
 
     #[command(about = "Install casks  [alias: c]")]
@@ -165,6 +167,8 @@ enum Commands {
         user: bool,
         #[arg(long, help = "Install to system directory (may need sudo)")]
         global: bool,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
 
     #[command(about = "Uninstall a formula or cask  [alias: ui, rm, remove]")]
@@ -546,6 +550,7 @@ async fn main() -> Result<()> {
             global,
             build_from_source,
             head,
+            no_script,
         } => {
             if packages.is_empty() && !cask {
                 // No packages specified — sync from lockfile like `npm install`
@@ -560,6 +565,7 @@ async fn main() -> Result<()> {
                     global,
                     build_from_source,
                     head,
+                    !no_script,
                 )
                 .await
             }
@@ -569,9 +575,12 @@ async fn main() -> Result<()> {
             dry_run,
             user,
             global,
+            no_script,
         } => {
-            commands::install::install(&cache, &packages, dry_run, true, user, global, false, false)
-                .await
+            commands::install::install(
+                &cache, &packages, dry_run, true, user, global, false, false, !no_script,
+            )
+            .await
         }
         Commands::Uninstall {
             formulae,

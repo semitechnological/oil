@@ -86,6 +86,14 @@ fn doctor_help_mentions_full_flag() {
     assert!(stdout.contains("--full"), "{stdout}");
 }
 
+#[test]
+fn install_help_mentions_no_script_flag() {
+    let out = wax().args(["install", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("--no-script"), "{stdout}");
+}
+
 // ── list / tap list work offline ─────────────────────────────────────────────
 
 #[test]
