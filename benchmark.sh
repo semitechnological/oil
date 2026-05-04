@@ -89,7 +89,7 @@ timeit() {
     local t status
     local TIMEFORMAT='%3R'
     set +e
-    t=$( { time "$@" >/dev/null 2>&1; } 2>&1 )
+    t=$( { time "$@" >/dev/null 2>&1 </dev/null; } 2>&1 )
     status=$?
     set -e
     if [[ $status -ne 0 || -z "$t" || ! "$t" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
@@ -398,8 +398,9 @@ measure_download_group tree_dl_time tree_dl_bytes "tree" tree
 
 wax_tree_times=()
 for i in $(seq 1 "$RUNS"); do
-    "$WAX" uninstall tree >/dev/null 2>&1 || true
-    printf "    wax run %-2s installing..." "$i"
+    printf "    wax run %-2s uninstalling..." "$i"
+    "$WAX" --yes uninstall tree >/dev/null 2>&1 </dev/null || true
+    printf "\r    wax run %-2s installing..." "$i"
     t=$(timeit "$WAX" install tree --user)
     wax_tree_times+=("$t")
     printf "\r    wax run %-2s %ss       \n" "$i" "$t"
@@ -410,8 +411,9 @@ printf "    ${BOLD}wax avg   %ss wall, %s download-adjusted${NC}\n" "$wax_tree" 
 
 brew_tree_times=()
 for i in $(seq 1 "$RUNS"); do
-    "$BREW" uninstall --force tree >/dev/null 2>&1 || true
-    printf "    brew run %-2s installing..." "$i"
+    printf "    brew run %-2s uninstalling..." "$i"
+    "$BREW" uninstall --force tree >/dev/null 2>&1 </dev/null || true
+    printf "\r    brew run %-2s installing..." "$i"
     t=$(timeit "$BREW" install tree)
     brew_tree_times+=("$t")
     printf "\r    brew run %-2s %ss       \n" "$i" "$t"
@@ -432,8 +434,9 @@ measure_download_group multi_dl_time multi_dl_bytes "ripgrep + bat + fd" ripgrep
 
 wax_multi_times=()
 for i in $(seq 1 "$RUNS"); do
-    "$WAX" uninstall ripgrep bat fd >/dev/null 2>&1 || true
-    printf "    wax run %-2s installing..." "$i"
+    printf "    wax run %-2s uninstalling..." "$i"
+    "$WAX" --yes uninstall ripgrep bat fd >/dev/null 2>&1 </dev/null || true
+    printf "\r    wax run %-2s installing..." "$i"
     t=$(timeit "$WAX" install ripgrep bat fd --user)
     wax_multi_times+=("$t")
     printf "\r    wax run %-2s %ss       \n" "$i" "$t"
@@ -444,8 +447,9 @@ printf "    ${BOLD}wax avg   %ss wall, %s download-adjusted${NC}\n" "$wax_multi"
 
 brew_multi_times=()
 for i in $(seq 1 "$RUNS"); do
-    "$BREW" uninstall --force ripgrep bat fd >/dev/null 2>&1 || true
-    printf "    brew run %-2s installing..." "$i"
+    printf "    brew run %-2s uninstalling..." "$i"
+    "$BREW" uninstall --force ripgrep bat fd >/dev/null 2>&1 </dev/null || true
+    printf "\r    brew run %-2s installing..." "$i"
     t=$(timeit "$BREW" install ripgrep bat fd)
     brew_multi_times+=("$t")
     printf "\r    brew run %-2s %ss       \n" "$i" "$t"
@@ -469,17 +473,7 @@ fi
 # ---------- summary -----------------------------------------------------------
 
 echo -e "\n${BOLD}=== Summary ===${NC}"
-printf "\n  %-24s %10s %10s %10s\n" "Benchmark" "wax" "brew" "speedup"
-printf  "  %-24s %10s %10s %10s\n" "---------" "---" "----" "-------"
-printf  "  %-24s %10s %10s %10s\n" "update (warm)" "$(fmt_time "$wax_update")" "$(fmt_time "$brew_update")" "$(speedup "$brew_update" "$wax_update")"
-printf  "  %-24s %10s %10s %10s\n" "search nginx" "$(fmt_time "$wax_search")" "$(fmt_time "$brew_search")" "$(speedup "$brew_search" "$wax_search")"
-printf  "  %-24s %10s %10s %10s\n" "info nginx" "$(fmt_time "$wax_info")" "$(fmt_time "$brew_info")" "$(speedup "$brew_info" "$wax_info")"
-printf  "  %-24s %10s %10s %10s\n" "install tree wall" "$(fmt_time "$wax_tree")" "$(fmt_time "$brew_tree")" "$(speedup "$brew_tree" "$wax_tree")"
-printf  "  %-24s %10s %10s %10s\n" "install tree - dl" "$(fmt_time "$wax_tree_adj")" "$(fmt_time "$brew_tree_adj")" "$(speedup "$brew_tree_adj" "$wax_tree_adj")"
-printf  "  %-24s %10s %10s %10s\n" "multi install wall" "$(fmt_time "$wax_multi")" "$(fmt_time "$brew_multi")" "$(speedup "$brew_multi" "$wax_multi")"
-printf  "  %-24s %10s %10s %10s\n" "multi install - dl" "$(fmt_time "$wax_multi_adj")" "$(fmt_time "$brew_multi_adj")" "$(speedup "$brew_multi_adj" "$wax_multi_adj")"
-
-echo -e "\n${BOLD}=== Copyable Report ===${NC}"
+echo -e "\n${BOLD}Copyable report:${NC}"
 cat <<EOF
 wax benchmark report
 date: $RUN_DATE
@@ -506,3 +500,13 @@ results:
   install_ripgrep_bat_fd_wall: wax $(fmt_time "$wax_multi"), brew $(fmt_time "$brew_multi"), speedup $(speedup "$brew_multi" "$wax_multi")
   install_ripgrep_bat_fd_download_adjusted: wax $(fmt_time "$wax_multi_adj"), brew $(fmt_time "$brew_multi_adj"), speedup $(speedup "$brew_multi_adj" "$wax_multi_adj")
 EOF
+
+printf "\n  %-24s %10s %10s %10s\n" "Benchmark" "wax" "brew" "speedup"
+printf  "  %-24s %10s %10s %10s\n" "---------" "---" "----" "-------"
+printf  "  %-24s %10s %10s %10s\n" "update (warm)" "$(fmt_time "$wax_update")" "$(fmt_time "$brew_update")" "$(speedup "$brew_update" "$wax_update")"
+printf  "  %-24s %10s %10s %10s\n" "search nginx" "$(fmt_time "$wax_search")" "$(fmt_time "$brew_search")" "$(speedup "$brew_search" "$wax_search")"
+printf  "  %-24s %10s %10s %10s\n" "info nginx" "$(fmt_time "$wax_info")" "$(fmt_time "$brew_info")" "$(speedup "$brew_info" "$wax_info")"
+printf  "  %-24s %10s %10s %10s\n" "install tree wall" "$(fmt_time "$wax_tree")" "$(fmt_time "$brew_tree")" "$(speedup "$brew_tree" "$wax_tree")"
+printf  "  %-24s %10s %10s %10s\n" "install tree - dl" "$(fmt_time "$wax_tree_adj")" "$(fmt_time "$brew_tree_adj")" "$(speedup "$brew_tree_adj" "$wax_tree_adj")"
+printf  "  %-24s %10s %10s %10s\n" "multi install wall" "$(fmt_time "$wax_multi")" "$(fmt_time "$brew_multi")" "$(speedup "$brew_multi" "$wax_multi")"
+printf  "  %-24s %10s %10s %10s\n" "multi install - dl" "$(fmt_time "$wax_multi_adj")" "$(fmt_time "$brew_multi_adj")" "$(speedup "$brew_multi_adj" "$wax_multi_adj")"
