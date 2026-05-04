@@ -633,6 +633,17 @@ impl BottleDownloader {
                             path.display()
                         ))
                     })?;
+                    let target = Path::new(&*link_name);
+                    if target.is_absolute()
+                        || target
+                            .components()
+                            .any(|c| c == std::path::Component::ParentDir)
+                    {
+                        return Err(WaxError::InstallError(format!(
+                            "Hard link target escapes destination: {}",
+                            link_name.display()
+                        )));
+                    }
                     let link_target = canonical_dest.join(&*link_name);
                     if !link_target.starts_with(&canonical_dest) {
                         return Err(WaxError::InstallError(format!(
@@ -1172,6 +1183,26 @@ mod tests {
         (temp, tarball)
     }
 
+    fn archive_with_hardlink(link_path: &str, target: &str) -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        let tarball = temp.path().join("archive.tar.gz");
+        let file = std::fs::File::create(&tarball).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+        let mut builder = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+
+        header.set_entry_type(tar::EntryType::Link);
+        header.set_mode(0o644);
+        header.set_size(0);
+        header.set_cksum();
+        builder.append_link(&mut header, link_path, target).unwrap();
+        builder.finish().unwrap();
+        let encoder = builder.into_inner().unwrap();
+        encoder.finish().unwrap();
+
+        (temp, tarball)
+    }
+
     // ── num_connections ──────────────────────────────────────────────────────
 
     #[test]
@@ -1274,6 +1305,17 @@ mod tests {
 
         assert!(result.is_err());
         assert!(format!("{:?}", result.unwrap_err()).contains("absolute"));
+    }
+
+    #[test]
+    fn extract_rejects_hardlink_parent_traversal() {
+        let (_archive_dir, tarball) = archive_with_hardlink("bin/tool", "../outside");
+        let dest = tempfile::tempdir().unwrap();
+
+        let result = BottleDownloader::extract(&tarball, dest.path());
+
+        assert!(result.is_err());
+        assert!(format!("{:?}", result.unwrap_err()).contains("Hard link target"));
     }
 
     #[test]
