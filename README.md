@@ -48,6 +48,7 @@ cd wax
 To **force** a pre-built release while standing in a clone, set `WAX_USE_RELEASE=1` before `./install.sh`.
 
 GitHub Releases ship **Linux** and **macOS** binaries (`wax-linux-*`, `wax-macos-*`) with `.sha256` sidecars when published by CI.
+The installer requires checksum verification by default. Set `WAX_NO_VERIFY=1` only when you explicitly accept installing without a `.sha256` sidecar.
 
 **Homebrew tap** — builds from source via cargo:
 
@@ -109,6 +110,7 @@ wax i tree           # shorthand
 wax install tree --user    # to ~/.local/wax
 wax install tree --global  # to system directory
 wax install tree --build-from-source  # force source build
+wax install tree --no-script  # skip automatic post-install scripts
 
 # Install casks with shorthand
 wax cask iterm2
@@ -193,6 +195,8 @@ tree = { version = "2.1.1", bottle = "arm64_ventura" }
 
 **Bottles First, Source When Needed**: Prioritizes precompiled bottles for speed but automatically falls back to source compilation when bottles are unavailable. Supports multiple build systems for broad compatibility.
 
+**Post-Install Control**: Runs supported post-install hooks when available through an installed Homebrew-compatible toolchain. Use `--no-script` on install/cask commands to skip automatic post-install work.
+
 **Custom Tap Support**: Clones third-party taps as Git repositories, parses Ruby formula files, and integrates them with core formulae for unified package management.
 
 **Async-First**: Uses tokio runtime for all I/O operations. Parallel downloads with configurable concurrency limits (default 8 simultaneous).
@@ -215,7 +219,10 @@ cargo test
 cargo run -- --verbose install tree
 
 # Check for issues
-cargo clippy
+cargo fmt --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test
+cargo audit
 ```
 
 Requires Rust 1.70+. Key dependencies:
@@ -252,7 +259,7 @@ See `docs/comparison.md` for detailed methodology and analysis.
 - **Build System Detection**: Source builds use heuristic detection of build systems. Complex or non-standard build configurations may fail.
 - **Formula DSL Subset**: Parses essential Ruby formula syntax. Advanced features (conditional deps, patches, custom install blocks) may not be fully supported.
 - **macOS Primary**: Developed for macOS. Linux support is functional but less tested.
-- **No Post-Install Scripts**: Skips formula post-install hooks for security and performance. Some packages may require manual configuration.
+- **Post-Install Coverage**: Wax can run supported post-install hooks when a compatible `brew postinstall` command is installed. Use `--no-script` to skip this behavior. Native post-install execution without Homebrew compatibility tooling is still limited.
 
 ## Acknowledgments
 

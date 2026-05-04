@@ -358,7 +358,7 @@ Linux ARM: aarch64_linux
 - Concurrent checksum verification
 - Streaming extraction
 - Minimal filesystem operations
-- No post-install scripts (trade-off for speed)
+- Post-install scripts are opt-out with `--no-script`
 
 ### Source Building
 
@@ -396,8 +396,8 @@ Linux ARM: aarch64_linux
 ### Current Limitations
 
 1. Build system detection is heuristic-based and may fail for complex configurations
-2. No binary relocation (@@HOMEBREW_CELLAR@@ placeholders)
-3. No post-install script execution
+2. Binary relocation support is best-effort and may not cover every bottle layout
+3. Native post-install execution without Homebrew compatibility tooling is limited
 4. No caveats display
 5. Ruby formula parser supports common patterns but not advanced DSL features
 6. No patch application during source builds
@@ -414,8 +414,8 @@ Linux ARM: aarch64_linux
 
 ### Future Enhancements
 
-1. Binary relocation support (install_name_tool on macOS)
-2. Post-install script execution (sandboxed)
+1. Broader binary relocation support (install_name_tool on macOS)
+2. Native post-install script execution (sandboxed)
 3. Patch application during source builds
 4. Advanced Ruby DSL parsing (conditions, variables)
 5. HTTP caching (ETag, If-Modified-Since)

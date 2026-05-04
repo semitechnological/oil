@@ -1,5 +1,3 @@
-- ri will just create packages that dont exist for no reason
 - wax i should check linkages if a package is already installed
-- noscript flag
 - system package management completeness nix parity
 - standardised time to action and add a flag for it

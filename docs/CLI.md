@@ -171,6 +171,9 @@ Install to system directory. May require sudo.
 `--build-from-source`
 Force compilation from source even if bottle is available. Useful for custom builds or when bottles are outdated.
 
+`--no-script`
+Skip automatic post-install scripts.
+
 **Examples:**
 ```bash
 wax install tree
@@ -178,6 +181,7 @@ wax install jq --dry-run
 wax install --cask iterm2
 wax install nginx --user
 wax install nginx --build-from-source
+wax install nginx --no-script
 wax install user/tap/custom-package
 wax i -v ripgrep
 ```

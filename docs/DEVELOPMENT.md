@@ -11,7 +11,7 @@
 ### Building from Source
 
 ```bash
-git clone https://github.com/yourusername/wax.git
+git clone https://github.com/plyght/wax.git
 cd wax
 cargo build --release
 ```
@@ -28,10 +28,10 @@ Debug builds include additional logging and checks.
 
 ### Running Tests
 
-Currently, Wax uses integration tests via shell scripts:
+Wax uses Cargo unit and integration tests:
 
 ```bash
-./test_phase2.sh
+cargo test
 ```
 
 ### Running the Binary
@@ -48,9 +48,10 @@ cargo run -- --verbose install jq
 ### Code Quality Checks
 
 ```bash
-cargo clippy
 cargo fmt --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test
+cargo audit
 ```
 
 ## Project Structure
@@ -80,7 +81,7 @@ wax/
 │       ├── lock.rs
 │       └── sync.rs
 ├── docs/                    # Documentation
-├── test_phase2.sh          # Integration tests
+├── tests/                  # Integration tests
 ├── Cargo.toml              # Dependencies and metadata
 └── README.md               # User-facing documentation
 ```
@@ -204,10 +205,10 @@ cargo run -- --verbose install jq  # Has dependencies
 
 ### Integration Tests
 
-The `test_phase2.sh` script validates core functionality:
+The Cargo test suite validates core functionality:
 
 ```bash
-./test_phase2.sh
+cargo test
 ```
 
 Tests include:
