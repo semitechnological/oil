@@ -36,7 +36,25 @@ use version::WAX_VERSION;
 fn should_refresh_state(command: &Commands) -> bool {
     !matches!(
         command,
-        Commands::Completions { .. } | Commands::__RefreshState
+        Commands::Completions { .. }
+            | Commands::__RefreshState
+            | Commands::Install { .. }
+            | Commands::InstallCask { .. }
+            | Commands::Uninstall { .. }
+            | Commands::Reinstall { .. }
+            | Commands::Postinstall { .. }
+            | Commands::Upgrade { .. }
+            | Commands::System { .. }
+            | Commands::Lock
+            | Commands::Sync
+            | Commands::Link { .. }
+            | Commands::Unlink { .. }
+            | Commands::Cleanup { .. }
+            | Commands::Pin { .. }
+            | Commands::Unpin { .. }
+            | Commands::Tap { repair: true, .. }
+            | Commands::Doctor { fix: true, .. }
+            | Commands::Bundle { dry_run: false, .. }
     )
 }
 
@@ -47,7 +65,10 @@ async fn refresh_state_in_child_process() {
 
     let _ = std::process::Command::new(exe)
         .arg("__refresh_state")
-        .status();
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 }
 
 #[derive(Parser)]
@@ -74,6 +95,10 @@ struct Cli {
 enum Commands {
     #[command(about = "Update formula index or wax itself")]
     Update {
+        #[arg(
+            help = "Optional shorthand: s/self for stable self-update, sn/self-nightly for GitHub HEAD"
+        )]
+        action: Option<String>,
         #[arg(
             short = 's',
             long = "self",
@@ -148,6 +173,8 @@ enum Commands {
             help = "Install the HEAD version (clones git repo, builds from source)"
         )]
         head: bool,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
 
     #[command(about = "Install casks  [alias: c]")]
@@ -162,6 +189,8 @@ enum Commands {
         user: bool,
         #[arg(long, help = "Install to system directory (may need sudo)")]
         global: bool,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
 
     #[command(about = "Uninstall a formula or cask  [alias: ui, rm, remove]")]
@@ -187,7 +216,7 @@ enum Commands {
         packages: Vec<String>,
         #[arg(long)]
         cask: bool,
-        #[arg(long, help = "Reinstall all installed formulae")]
+        #[arg(long, help = "Reinstall all installed formulae and casks")]
         all: bool,
     },
 
@@ -308,6 +337,12 @@ enum Commands {
     Doctor {
         #[arg(long, help = "Automatically fix detected issues")]
         fix: bool,
+        #[arg(
+            long,
+            alias = "deep",
+            help = "Run full diagnostics, including slower network, bottle, and code-signature scans"
+        )]
+        full: bool,
     },
 
     #[command(about = "Install packages from a Waxfile (formulae, casks, cargo, uv)")]
@@ -531,12 +566,28 @@ async fn main() -> Result<()> {
 
     let result = match command {
         Commands::Update {
-            update_self,
-            nightly,
+            action,
+            mut update_self,
+            mut nightly,
             force,
             clean,
             no_clean,
         } => {
+            if let Some(action) = action {
+                match action.as_str() {
+                    "s" | "self" => update_self = true,
+                    "sn" | "self-nightly" => {
+                        update_self = true;
+                        nightly = true;
+                    }
+                    other => {
+                        return Err(error::WaxError::InvalidInput(format!(
+                            "Unknown update shorthand '{other}' (use s/self or sn/self-nightly)"
+                        )));
+                    }
+                }
+            }
+
             if update_self {
                 if clean && no_clean {
                     return Err(error::WaxError::InvalidInput(
@@ -580,6 +631,7 @@ async fn main() -> Result<()> {
             global,
             build_from_source,
             head,
+            no_script,
         } => {
             if packages.is_empty() && !cask {
                 // No packages specified — sync from lockfile like `npm install`
@@ -594,6 +646,7 @@ async fn main() -> Result<()> {
                     global,
                     build_from_source,
                     head,
+                    !no_script,
                 )
                 .await
             }
@@ -603,9 +656,12 @@ async fn main() -> Result<()> {
             dry_run,
             user,
             global,
+            no_script,
         } => {
-            commands::install::install(&cache, &packages, dry_run, true, user, global, false, false)
-                .await
+            commands::install::install(
+                &cache, &packages, dry_run, true, user, global, false, false, !no_script,
+            )
+            .await
         }
         Commands::Uninstall {
             formulae,
@@ -779,7 +835,7 @@ async fn main() -> Result<()> {
         Commands::__RefreshState => commands::refresh::refresh(&cache).await,
         Commands::Sync => commands::sync::sync(&cache).await,
         Commands::Tap { action, repair } => commands::tap::tap(action, repair, Some(&cache)).await,
-        Commands::Doctor { fix } => commands::doctor::doctor(&cache, fix).await,
+        Commands::Doctor { fix, full } => commands::doctor::doctor(&cache, fix, full).await,
         Commands::Bundle {
             file,
             dry_run,

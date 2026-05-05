@@ -1,5 +1,5 @@
 use crate::api::ApiClient;
-use crate::bottle::{detect_platform, BottleDownloader};
+use crate::bottle::{detect_platform, BottleDownloader, DownloadTotals};
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::commands::self_update::{self_update, Channel};
@@ -16,6 +16,7 @@ use crate::version::{is_same_or_newer, WAX_VERSION};
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Semaphore;
@@ -59,18 +60,16 @@ pub async fn upgrade(cache: &Cache, packages: &[String], dry_run: bool) -> Resul
     if packages.is_empty() {
         upgrade_all(cache, dry_run, start).await
     } else {
+        let cask_state = CaskState::new()?;
+        let installed_casks = cask_state.load().await?;
         let mut failed_names = Vec::new();
         for package in packages {
             if let Err(e) = if package == "wax" {
                 upgrade_single(cache, package, dry_run).await
+            } else if installed_casks.contains_key(package) {
+                upgrade_cask_single(cache, package, dry_run).await
             } else {
-                let cask_state = CaskState::new()?;
-                let installed_casks = cask_state.load().await?;
-                if installed_casks.contains_key(package) {
-                    upgrade_cask_single(cache, package, dry_run).await
-                } else {
-                    upgrade_single(cache, package, dry_run).await
-                }
+                upgrade_single(cache, package, dry_run).await
             } {
                 eprintln!(
                     "{} {} failed: {}",
@@ -272,7 +271,48 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
     let semaphore = Arc::new(Semaphore::new(upgrade_concurrent_limit));
     let temp_dir = Arc::new(TempDir::new()?);
 
-    let mut download_tasks: JoinSet<Result<PreDownloaded>> = JoinSet::new();
+    let formula_totals = Arc::new(DownloadTotals::default());
+    let hide_formula_dl = Arc::new(AtomicBool::new(false));
+
+    let overall_formula_pb = if formula_bottle_urls.len() > 1 {
+        let pb = multi.insert(0, ProgressBar::new(0));
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(PROGRESS_BAR_TEMPLATE)
+                .unwrap()
+                .progress_chars(PROGRESS_BAR_CHARS),
+        );
+        pb.set_message("All formula downloads");
+        Some(pb)
+    } else {
+        None
+    };
+
+    let update_formula_totals = if let Some(ref pb) = overall_formula_pb {
+        let totals = formula_totals.clone();
+        let hide = Arc::clone(&hide_formula_dl);
+        let pb = pb.clone();
+        Some(tokio::spawn(async move {
+            loop {
+                if hide.load(Ordering::Relaxed) {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                if hide.load(Ordering::Relaxed) {
+                    return;
+                }
+                let pos = totals.downloaded.load(Ordering::Relaxed);
+                let len = totals.expected.load(Ordering::Relaxed);
+                let cap = len.max(pos).max(1);
+                pb.set_length(cap);
+                pb.set_position(pos);
+            }
+        }))
+    } else {
+        None
+    };
+
+    let mut download_tasks: JoinSet<(String, Result<PreDownloaded>)> = JoinSet::new();
     for pkg in outdated.iter().filter(|pkg| !pkg.is_cask) {
         let Some(formula) = formula_by_name.get(pkg.name.as_str()) else {
             continue;
@@ -298,56 +338,83 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
         let tmp = Arc::clone(&temp_dir);
         let multi_ref = multi.clone();
         let conns = upgrade_connections_map.get(&pkg.name).copied().unwrap_or(1);
+        let totals = Arc::clone(&formula_totals);
 
         download_tasks.spawn(async move {
-            let permit = sem.acquire().await.unwrap();
-            crate::signal::check_cancelled()?;
+            let task_name = name.clone();
+            let result = async {
+                let permit = sem.acquire().await.unwrap();
+                crate::signal::check_cancelled()?;
 
-            let tarball = tmp.path().join(format!("{}-{}.tar.gz", name, version));
-            let pb = multi_ref.insert_from_back(1, ProgressBar::new(0));
-            pb.set_style(
-                ProgressStyle::default_bar()
-                    .template(PROGRESS_BAR_TEMPLATE)
-                    .unwrap()
-                    .progress_chars(PROGRESS_BAR_CHARS),
-            );
-            pb.set_message(name.clone());
+                let tarball = tmp.path().join(format!("{}-{}.tar.gz", name, version));
+                let pb = multi_ref.insert_from_back(1, ProgressBar::new(0));
+                pb.set_style(
+                    ProgressStyle::default_bar()
+                        .template(PROGRESS_BAR_TEMPLATE)
+                        .unwrap()
+                        .progress_chars(PROGRESS_BAR_CHARS),
+                );
+                pb.set_message(name.clone());
 
-            dl.download(&url, &tarball, Some(&pb), conns, None).await?;
-            pb.finish_and_clear();
+                let download_result = dl
+                    .download(&url, &tarball, Some(&pb), conns, Some(totals.as_ref()))
+                    .await;
+                pb.finish_and_clear();
+                download_result?;
 
-            // Release the download permit before extraction.
-            drop(permit);
+                // Release the download permit before extraction.
+                drop(permit);
 
-            BottleDownloader::verify_checksum(&tarball, &sha256)?;
+                BottleDownloader::verify_checksum(&tarball, &sha256)?;
 
-            let extract_dir = tmp.path().join(&name);
-            BottleDownloader::extract(&tarball, &extract_dir)?;
+                let extract_dir = tmp.path().join(&name);
+                BottleDownloader::extract(&tarball, &extract_dir)?;
 
-            Ok::<_, WaxError>(PreDownloaded {
-                name,
-                version,
-                extract_dir,
-                bottle_sha: sha256,
-                bottle_rebuild: rebuild,
-                _temp_dir: tmp,
-            })
+                Ok::<_, WaxError>(PreDownloaded {
+                    name,
+                    version,
+                    extract_dir,
+                    bottle_sha: sha256,
+                    bottle_rebuild: rebuild,
+                    _temp_dir: tmp,
+                })
+            }
+            .await;
+            (task_name, result)
         });
     }
 
     let mut pre_downloaded: HashMap<String, PreDownloaded> = HashMap::new();
+    let mut failed_predownloads: HashSet<String> = HashSet::new();
     while let Some(task) = download_tasks.join_next().await {
         match task {
-            Ok(Ok(d)) => {
+            Ok((_, Ok(d))) => {
                 pre_downloaded.insert(d.name.clone(), d);
             }
-            Ok(Err(e)) => {
-                let _ = multi.println(format!("{} download failed: {}", style("✗").red(), e));
+            Ok((name, Err(e))) => {
+                failed_predownloads.insert(name.clone());
+                let _ = multi.println(format!(
+                    "{} {} download failed: {}",
+                    style("✗").red(),
+                    style(&name).magenta(),
+                    e
+                ));
             }
             Err(e) => {
-                let _ = multi.println(format!("{} task error: {}", style("✗").red(), e));
+                return Err(WaxError::InstallError(format!(
+                    "download worker failed before upgrade started: {}",
+                    e
+                )));
             }
         }
+    }
+
+    hide_formula_dl.store(true, Ordering::SeqCst);
+    if let Some(poller) = update_formula_totals {
+        let _ = poller.await;
+    }
+    if let Some(pb) = overall_formula_pb {
+        pb.finish_and_clear();
     }
 
     // --- Phase 1: serial uninstall + install using pre-downloaded bottles ---
@@ -358,11 +425,26 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
     let mut fail_count = 0;
     let mut failed_names: Vec<String> = Vec::new();
 
-    for (i, pkg) in outdated.into_iter().enumerate() {
+    let (cask_packages, formula_packages): (Vec<_>, Vec<_>) =
+        outdated.into_iter().partition(|pkg| pkg.is_cask);
+    let formula_total = formula_packages.len();
+
+    for (i, pkg) in formula_packages.into_iter().enumerate() {
         check_cancelled()?;
         let _critical = CriticalSection::new();
 
-        let label = format!("({}/{}) {}", i + 1, total, pkg.name);
+        let label = format!("({}/{}) {}", i + 1, formula_total, pkg.name);
+
+        if failed_predownloads.contains(&pkg.name) {
+            fail_count += 1;
+            let _ = multi.println(format!(
+                "{} {} skipped: pre-download failed, leaving installed version in place",
+                style("✗").red(),
+                style(&pkg.name).magenta()
+            ));
+            failed_names.push(pkg.name);
+            continue;
+        }
 
         let spinner = multi.insert_from_back(1, ProgressBar::new_spinner());
         spinner.set_style(
@@ -384,24 +466,12 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
         } else {
             uninstall::uninstall_quiet(cache, &pkg.name, false).await
         };
+        spinner.finish_and_clear();
         let result = match uninstall_result {
             Ok(()) => {
                 set_current_op(format!("installing {}", pkg.name));
 
-                if pkg.is_cask {
-                    // Reinstall in place so an interrupted run keeps the previous app.
-                    let r = install::install_quiet_with_progress(
-                        cache,
-                        std::slice::from_ref(&pkg.name),
-                        true,
-                        false,
-                        false,
-                        &ProgressBar::hidden(),
-                        true,
-                    )
-                    .await;
-                    r
-                } else if let Some(dl) = pre_downloaded.remove(&pkg.name) {
+                if let Some(dl) = pre_downloaded.remove(&pkg.name) {
                     // Formula: use pre-downloaded bottle.
                     // Pass a spinner as existing_pb so step!() messages update
                     // it in-place instead of printing new lines.
@@ -426,6 +496,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                         &platform,
                         &install_state,
                         false,
+                        true,
                         Some(&multi),
                         Some(install_pb.clone()),
                     )
@@ -472,16 +543,10 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
 
         match result {
             Ok(()) => {
-                let cask_indicator = if pkg.is_cask {
-                    format!(" {}", style("(cask)").yellow())
-                } else {
-                    String::new()
-                };
                 let _ = multi.println(format!(
-                    "{} {}{} {} → {}",
+                    "{} {} {} → {}",
                     style("✓").green(),
                     style(&pkg.name).magenta(),
-                    cask_indicator,
                     style(&pkg.installed_version).dim(),
                     style(&pkg.latest_version).green()
                 ));
@@ -496,6 +561,69 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                     e
                 ));
                 failed_names.push(pkg.name.clone());
+            }
+        }
+    }
+
+    for (i, pkg) in cask_packages.into_iter().enumerate() {
+        check_cancelled()?;
+        let _critical = CriticalSection::new();
+
+        let label = format!(
+            "({}/{}) {}",
+            i + 1,
+            total.saturating_sub(formula_total),
+            pkg.name
+        );
+        let spinner = multi.insert_from_back(1, ProgressBar::new_spinner());
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_chars(SPINNER_TICK_CHARS),
+        );
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+        set_current_op(format!("upgrading {}", pkg.name));
+        spinner.set_message(format!(
+            "{} upgrading {}...",
+            style(&label).dim(),
+            style(&pkg.name).magenta()
+        ));
+
+        let result = install::install_quiet_with_progress(
+            cache,
+            std::slice::from_ref(&pkg.name),
+            true,
+            false,
+            false,
+            &ProgressBar::hidden(),
+            true,
+        )
+        .await;
+        spinner.finish_and_clear();
+        clear_current_op();
+
+        match result {
+            Ok(()) => {
+                success_count += 1;
+                let _ = multi.println(format!(
+                    "{} {} {} {} → {}",
+                    style("✓").green(),
+                    style(&pkg.name).magenta(),
+                    style("(cask)").yellow(),
+                    style(&pkg.installed_version).dim(),
+                    style(&pkg.latest_version).green()
+                ));
+            }
+            Err(e) => {
+                fail_count += 1;
+                let _ = multi.println(format!(
+                    "{} {} failed: {}",
+                    style("✗").red(),
+                    style(&pkg.name).magenta(),
+                    e
+                ));
+                failed_names.push(pkg.name);
             }
         }
     }
@@ -555,12 +683,14 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                     ));
                 }
                 Err(e) => {
+                    fail_count += 1;
                     let _ = multi.println(format!(
                         "  {} {} reinstall failed: {}",
                         style("✗").red(),
                         style(dep_name).magenta(),
                         e
                     ));
+                    failed_names.push(dep_name.clone());
                 }
             }
         }
@@ -640,6 +770,18 @@ async fn upgrade_single(cache: &Cache, formula_name: &str, dry_run: bool) -> Res
     let latest_version = formula.full_version();
     let installed_version = &installed.version;
 
+    if is_same_or_newer(installed_version, &latest_version) {
+        println!(
+            "{} is already on the latest version ({}).",
+            style(formula_name).magenta(),
+            style(installed_version).dim()
+        );
+        if dry_run {
+            println!("\ndry run - no changes made");
+        }
+        return Ok(());
+    }
+
     if dry_run {
         println!(
             "{}: {} → {}",
@@ -688,6 +830,19 @@ async fn upgrade_cask_single(cache: &Cache, cask_name: &str, dry_run: bool) -> R
 
     let latest_version = &cask_details.version;
     let installed_version = &installed.version;
+
+    if is_same_or_newer(installed_version, latest_version) {
+        println!(
+            "{} {} is already on the latest version ({}).",
+            style(cask_name).magenta(),
+            style("(cask)").yellow(),
+            style(installed_version).dim()
+        );
+        if dry_run {
+            println!("\ndry run - no changes made");
+        }
+        return Ok(());
+    }
 
     if dry_run {
         println!(

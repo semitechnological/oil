@@ -192,6 +192,14 @@ async fn install_from_source_task(
 
     spinner.set_message("Building from source (this may take several minutes)...".to_string());
 
+    if parsed_formula.source.url.is_empty() {
+        spinner.finish_and_clear();
+        return Err(WaxError::BuildError(format!(
+            "Formula '{}' has no stable source URL; install it with --head",
+            formula.name
+        )));
+    }
+
     let temp_dir = TempDir::new()?;
     let source_tarball = temp_dir.path().join(format!(
         "{}-{}.tar.gz",
@@ -419,6 +427,7 @@ struct InstallArgs<'a> {
     global: bool,
     build_from_source: bool,
     head: bool,
+    run_scripts: bool,
     quiet: bool,
     force_reinstall: bool,
     external_pb: Option<&'a ProgressBar>,
@@ -435,6 +444,7 @@ pub async fn install(
     global: bool,
     build_from_source: bool,
     head: bool,
+    run_scripts: bool,
 ) -> Result<()> {
     install_impl(
         cache,
@@ -446,6 +456,7 @@ pub async fn install(
             global,
             build_from_source,
             head,
+            run_scripts,
             quiet: false,
             force_reinstall: false,
             external_pb: None,
@@ -475,6 +486,7 @@ pub async fn install_quiet(
             global,
             build_from_source: false,
             head: false,
+            run_scripts: true,
             quiet: true,
             force_reinstall: false,
             external_pb: None,
@@ -504,6 +516,7 @@ pub async fn install_quiet_force(
             global,
             build_from_source: false,
             head: false,
+            run_scripts: true,
             quiet: true,
             force_reinstall: true,
             external_pb: None,
@@ -535,6 +548,7 @@ pub async fn install_quiet_with_progress(
             global,
             build_from_source: false,
             head: false,
+            run_scripts: true,
             quiet: true,
             force_reinstall,
             external_pb: Some(pb),
@@ -555,6 +569,7 @@ async fn install_impl(
         global,
         build_from_source,
         head,
+        run_scripts,
         quiet,
         force_reinstall,
         external_pb,
@@ -1038,6 +1053,7 @@ async fn install_impl(
                 &platform,
                 &state,
                 false,
+                run_scripts,
                 None,
                 Some(ext_pb.clone()),
             )
@@ -1136,6 +1152,7 @@ async fn install_impl(
                     &platform,
                     &state,
                     quiet,
+                    run_scripts,
                     None,
                     Some(spinner.clone()),
                 )
@@ -1280,6 +1297,7 @@ pub async fn install_extracted_bottle(
     platform: &str,
     state: &InstallState,
     quiet: bool,
+    run_scripts: bool,
     multi: Option<&MultiProgress>,
     existing_pb: Option<ProgressBar>,
 ) -> Result<()> {
@@ -1339,20 +1357,24 @@ pub async fn install_extracted_bottle(
         tokio::fs::remove_dir_all(&formula_cellar)
             .await
             .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))
-            .map_err(|e| WaxError::InstallError(format!(
-                "Failed to clean old version at {}: {}",
-                formula_cellar.display(),
-                e
-            )))?;
+            .map_err(|e| {
+                WaxError::InstallError(format!(
+                    "Failed to clean old version at {}: {}",
+                    formula_cellar.display(),
+                    e
+                ))
+            })?;
     }
     tokio::fs::create_dir_all(&formula_cellar)
         .await
         .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))
-        .map_err(|e| WaxError::InstallError(format!(
-            "Failed to create cellar directory {}: {}",
-            formula_cellar.display(),
-            e
-        )))?;
+        .map_err(|e| {
+            WaxError::InstallError(format!(
+                "Failed to create cellar directory {}: {}",
+                formula_cellar.display(),
+                e
+            ))
+        })?;
 
     step!("copying to cellar...");
     let actual_content_dir = name_dir.join(&cellar_version);
@@ -1381,7 +1403,7 @@ pub async fn install_extracted_bottle(
     step!("symlinking...");
     create_symlinks(name, &cellar_version, cellar, false, install_mode).await?;
 
-    if let Some(_formula) = state.load().await?.get(name) {
+    if run_scripts && state.load().await?.contains_key(name) {
         // Auto-run postinstall if possible
         if let Ok(formulae) = state.load_formulae_from_cache().await {
             if let Some(f) = formulae

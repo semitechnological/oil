@@ -1,0 +1,3 @@
+- wax i should check linkages if a package is already installed
+- system package management completeness nix parity
+- standardised time to action and add a flag for it

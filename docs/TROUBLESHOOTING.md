@@ -425,7 +425,7 @@ Include in bug report:
 5. Relevant log entries (with `--verbose`)
 6. Steps to reproduce
 
-Submit to: https://github.com/yourusername/wax/issues
+Submit to: https://github.com/plyght/wax/issues
 
 ### Community Support
 
@@ -438,20 +438,20 @@ Submit to: https://github.com/yourusername/wax/issues
 
 These are expected behavior:
 
-**No Source Building:**
-Wax only installs bottles (pre-compiled binaries). If bottle unavailable, use Homebrew.
+**Source Building Is Heuristic:**
+Wax can build from source when bottles are unavailable, but build system detection and formula DSL support are not complete for every formula.
 
-**No Post-Install Scripts:**
-Wax does not execute post-install scripts for security and simplicity. Some formulae requiring setup will not work correctly.
+**Post-Install Scripts Are Limited:**
+Wax can run supported post-install hooks when a compatible `brew postinstall` command is installed. Use `wax install --no-script <formula>` to skip automatic post-install work.
 
-**No Binary Relocation:**
-Wax does not relocate library paths in bottles. Some formulae with complex shared library dependencies may not work.
+**Binary Relocation Is Best-Effort:**
+Wax relocates common bottle placeholders and binary paths, but some formulae with complex shared library dependencies may still need manual repair.
 
-**No Custom Taps:**
-Wax only supports homebrew/core and homebrew/cask. Custom taps are not yet supported.
+**Custom Tap Support Is Safety-Restricted:**
+Wax supports custom taps from `user/repo`, `https://`, `git@`, and local paths. Plain `http://` tap URLs are rejected.
 
-**No Service Management:**
-Wax does not start or manage services. Use system tools (launchctl, systemd).
+**Service Management Is Limited:**
+Wax includes service commands for common launchctl/systemd workflows, but complex service setup may still require system tools.
 
 ## Performance Issues
 

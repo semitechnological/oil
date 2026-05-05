@@ -64,18 +64,36 @@ impl FormulaParser {
     pub fn parse_ruby_formula(name: &str, ruby_content: &str) -> Result<ParsedFormula> {
         debug!("Parsing Ruby formula: {}", name);
 
-        let url = Self::extract_field(ruby_content, "url")?;
-        let sha256 = Self::extract_field(ruby_content, "sha256")?;
+        let head_url = Self::extract_head_url(ruby_content);
+        let url = Self::extract_field(ruby_content, "url").or_else(|e| {
+            if head_url.is_some() {
+                Ok(String::new())
+            } else {
+                Err(e)
+            }
+        })?;
+        let sha256 = Self::extract_field(ruby_content, "sha256").or_else(|e| {
+            if head_url.is_some() {
+                Ok(String::new())
+            } else {
+                Err(e)
+            }
+        })?;
         let desc = Self::extract_field(ruby_content, "desc").ok();
         let homepage = Self::extract_field(ruby_content, "homepage").ok();
         let license = Self::extract_field(ruby_content, "license").ok();
-        let head_url = Self::extract_head_url(ruby_content);
 
         // Prefer an explicit `version "x.y.z"` field; fall back to parsing from URL.
         let version = Self::extract_field(ruby_content, "version")
             .ok()
             .filter(|v| !v.is_empty())
-            .unwrap_or_else(|| Self::extract_version_from_url(&url));
+            .unwrap_or_else(|| {
+                if url.is_empty() {
+                    "HEAD".to_string()
+                } else {
+                    Self::extract_version_from_url(&url)
+                }
+            });
 
         let runtime_dependencies = Self::extract_dependencies(ruby_content, false);
         let build_dependencies = Self::extract_dependencies(ruby_content, true);
@@ -797,5 +815,34 @@ end
         if std::env::consts::OS == "linux" {
             assert!(FormulaParser::extract_platform_source(formula).is_none());
         }
+    }
+
+    #[test]
+    fn parse_head_only_formula() {
+        let formula = r#"
+class DriftWallpaper < Formula
+  desc "Fluid live wallpaper"
+  homepage "https://github.com/undivisible/drift-wallpaper"
+  version "0.1.0"
+  license "MPL-2.0"
+  head "https://github.com/undivisible/drift-wallpaper.git", branch: "m"
+
+  depends_on "rust" => :build
+
+  def install
+    system "cargo", "build", "--release", "-p", "drift-app", "--locked"
+    bin.install "target/release/drift-wallpaper"
+  end
+end
+"#;
+
+        let parsed = FormulaParser::parse_ruby_formula("drift-wallpaper", formula).unwrap();
+        assert_eq!(parsed.source.version, "0.1.0");
+        assert!(parsed.source.url.is_empty());
+        assert!(parsed.source.sha256.is_empty());
+        assert_eq!(
+            parsed.head_url.as_deref(),
+            Some("https://github.com/undivisible/drift-wallpaper.git")
+        );
     }
 }

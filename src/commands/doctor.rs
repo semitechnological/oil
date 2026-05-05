@@ -78,6 +78,25 @@ struct Check {
     run: BoxFuture<'static, DiagResult>,
 }
 
+async fn check_wax_update(fix: bool) -> DiagResult {
+    let mut d = DiagResult::new(fix);
+    match tokio::time::timeout(
+        Duration::from_secs(2),
+        crate::commands::self_update::available_stable_update(),
+    )
+    .await
+    {
+        Ok(Ok(Some(version))) => d.warn(&format!(
+            "wax {} is available — run `wax update self`",
+            style(format!("v{version}")).cyan()
+        )),
+        Ok(Ok(None)) => d.pass("wax is up to date"),
+        Ok(Err(e)) => d.warn(&format!("could not check wax update: {e}")),
+        Err(_) => d.warn("wax update check timed out"),
+    }
+    d
+}
+
 fn summary_status(d: &DiagResult) -> (&'static str, console::Style) {
     if d.failed > 0 {
         ("fail", console::Style::new().red().bold())
@@ -101,19 +120,23 @@ fn print_check_result(title: &str, result: &DiagResult, elapsed: Duration) {
     }
 }
 
-pub async fn doctor(cache: &Cache, fix: bool) -> Result<()> {
+pub async fn doctor(cache: &Cache, fix: bool, full: bool) -> Result<()> {
     let mut aggregate = DiagResult::new(fix);
     let cache = cache.clone();
     let start = Instant::now();
 
+    let run_full_checks = fix || full;
+
     if fix {
         println!("{}", style("running wax doctor --fix").bold());
+    } else if full {
+        println!("{}", style("running wax doctor --full").bold());
     } else {
-        println!("{}", style("running wax doctor").bold());
+        println!("{}", style("running wax doctor (quick)").bold());
     }
 
     let cache_for_check = cache.clone();
-    let checks: Vec<Check> = vec![
+    let mut checks: Vec<Check> = vec![
         Check {
             title: "platform",
             run: Box::pin(async move {
@@ -163,14 +186,6 @@ pub async fn doctor(cache: &Cache, fix: bool) -> Result<()> {
             run: Box::pin(async move { check_opt_symlinks(fix).await }),
         },
         Check {
-            title: "unrelocated bottles",
-            run: Box::pin(async move { check_unrelocated_bottles(fix).await }),
-        },
-        Check {
-            title: "code signatures",
-            run: Box::pin(async move { check_invalid_signatures(fix).await }),
-        },
-        Check {
             title: "tools",
             run: Box::pin(async move {
                 tokio::task::spawn_blocking(move || check_tools(fix))
@@ -211,6 +226,29 @@ pub async fn doctor(cache: &Cache, fix: bool) -> Result<()> {
             }),
         },
     ];
+
+    if run_full_checks {
+        checks.push(Check {
+            title: "wax update",
+            run: Box::pin(async move { check_wax_update(fix).await }),
+        });
+        checks.push(Check {
+            title: "unrelocated bottles",
+            run: Box::pin(async move {
+                tokio::task::spawn_blocking(move || check_unrelocated_bottles(fix))
+                    .await
+                    .unwrap()
+            }),
+        });
+        checks.push(Check {
+            title: "code signatures",
+            run: Box::pin(async move {
+                tokio::task::spawn_blocking(move || check_invalid_signatures(fix))
+                    .await
+                    .unwrap()
+            }),
+        });
+    }
 
     // One spinner per check, displayed in declaration order while all checks
     // run in parallel.
@@ -274,12 +312,26 @@ pub async fn doctor(cache: &Cache, fix: bool) -> Result<()> {
         parts.join(", "),
         style(format!("({:.2}s)", start.elapsed().as_secs_f32())).dim()
     );
+    if !run_full_checks {
+        println!(
+            "{} {} slow checks skipped",
+            style("skipped:").dim(),
+            style(3).yellow()
+        );
+    }
 
     if !fix && (aggregate.warned > 0 || aggregate.failed > 0) {
         println!(
             "{} run {} to auto-fix issues",
             style("hint:").dim(),
             style("wax doctor --fix").yellow()
+        );
+    }
+    if !run_full_checks {
+        println!(
+            "{} run {} for self-update, bottle relocation, and code-signature scans",
+            style("hint:").dim(),
+            style("wax doctor --full").yellow()
         );
     }
 
@@ -861,7 +913,7 @@ fn check_metal_toolchain(fix: bool) -> DiagResult {
     #[cfg(target_os = "macos")]
     {
         if let Some(output) =
-            run_command_with_timeout("system_profiler", &["SPDisplaysDataType"], 5)
+            run_command_with_timeout("system_profiler", &["SPDisplaysDataType"], 2)
         {
             let has_metal = output.contains("Metal Support") || output.contains("Metal Family");
             if has_metal {
@@ -1135,7 +1187,7 @@ async fn check_linux_user_bin_links(fix: bool) -> DiagResult {
     d
 }
 
-async fn check_unrelocated_bottles(fix: bool) -> DiagResult {
+fn check_unrelocated_bottles(fix: bool) -> DiagResult {
     let mut d = DiagResult::new(fix);
     #[cfg(target_os = "macos")]
     {
@@ -1356,11 +1408,48 @@ fn is_mach_o_with_placeholders(path: &Path) -> bool {
         .any(|w| w == placeholder)
 }
 
-async fn check_invalid_signatures(fix: bool) -> DiagResult {
+#[cfg(target_os = "macos")]
+fn mach_o_files_under(root: &Path) -> Vec<std::path::PathBuf> {
+    use std::io::Read;
+
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(|entry| entry.ok()) {
+            let path = entry.path();
+            let Ok(meta) = std::fs::symlink_metadata(&path) else {
+                continue;
+            };
+            let file_type = meta.file_type();
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_file() {
+                continue;
+            }
+            let mut buf = [0u8; 4];
+            let Ok(mut f) = std::fs::File::open(&path) else {
+                continue;
+            };
+            if f.read(&mut buf).is_ok() && crate::bottle::is_mach_o(&buf) {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+fn check_invalid_signatures(fix: bool) -> DiagResult {
     let mut d = DiagResult::new(fix);
     #[cfg(target_os = "macos")]
     {
-        use std::io::Read;
         use std::process::Command;
 
         let prefix = homebrew_prefix();
@@ -1407,39 +1496,17 @@ async fn check_invalid_signatures(fix: bool) -> DiagResult {
                 let ver_dir = pkg_dir.join(&version);
                 let mut pkg_invalid = false;
 
-                'outer: for subdir in &["bin", "lib"] {
-                    let dir = ver_dir.join(subdir);
-                    if !dir.is_dir() {
-                        continue;
-                    }
-                    let Ok(dir_entries) = std::fs::read_dir(&dir) else {
+                for file in mach_o_files_under(&ver_dir) {
+                    let Some(path_str) = file.to_str() else {
                         continue;
                     };
-                    for file in dir_entries.filter_map(|e| e.ok()).map(|entry| entry.path()) {
-                        let Ok(meta) = std::fs::metadata(&file) else {
-                            continue;
-                        };
-                        if !meta.is_file() {
-                            continue;
-                        }
-                        let mut buf = [0u8; 4];
-                        let Ok(mut f) = std::fs::File::open(&file) else {
-                            continue;
-                        };
-                        if f.read(&mut buf).is_err() || !crate::bottle::is_mach_o(&buf) {
-                            continue;
-                        }
-                        let Some(path_str) = file.to_str() else {
-                            continue;
-                        };
-                        if let Ok(out) = Command::new("codesign").args(["-v", path_str]).output() {
-                            let stderr = String::from_utf8_lossy(&out.stderr);
-                            if stderr.contains("invalid signature")
-                                || stderr.contains("code or signature have been modified")
-                            {
-                                pkg_invalid = true;
-                                break 'outer;
-                            }
+                    if let Ok(out) = Command::new("codesign").args(["-v", path_str]).output() {
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        if stderr.contains("invalid signature")
+                            || stderr.contains("code or signature have been modified")
+                        {
+                            pkg_invalid = true;
+                            break;
                         }
                     }
                 }
@@ -1499,53 +1566,25 @@ async fn check_invalid_signatures(fix: bool) -> DiagResult {
     d
 }
 
-/// Re-sign all Mach-O binaries in bin/ and lib/ subdirs with an ad-hoc signature.
+/// Re-sign all Mach-O binaries under a package version with an ad-hoc signature.
 /// Returns the number of successfully re-signed files.
 #[cfg(target_os = "macos")]
 fn resign_macho_binaries(ver_dir: &Path) -> usize {
-    use std::io::Read;
     use std::process::Command;
 
-    let mut count = 0;
-    for subdir in &["bin", "lib"] {
-        let dir = ver_dir.join(subdir);
-        if !dir.is_dir() {
-            continue;
-        }
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        let files: Vec<std::path::PathBuf> = entries
-            .filter_map(|e| e.ok().map(|entry| entry.path()))
-            .collect();
-        count += files
-            .into_par_iter()
-            .filter(|file| {
-                let Ok(meta) = std::fs::metadata(file) else {
-                    return false;
-                };
-                if !meta.is_file() {
-                    return false;
-                }
-                let mut buf = [0u8; 4];
-                let Ok(mut f) = std::fs::File::open(file) else {
-                    return false;
-                };
-                if f.read(&mut buf).is_err() || !crate::bottle::is_mach_o(&buf) {
-                    return false;
-                }
-                let Some(path_str) = file.to_str() else {
-                    return false;
-                };
-                Command::new("codesign")
-                    .args(["--force", "--sign", "-", path_str])
-                    .output()
-                    .map(|out| out.status.success())
-                    .unwrap_or(false)
-            })
-            .count();
-    }
-    count
+    mach_o_files_under(ver_dir)
+        .into_par_iter()
+        .filter(|file| {
+            let Some(path_str) = file.to_str() else {
+                return false;
+            };
+            Command::new("codesign")
+                .args(["--force", "--sign", "-", path_str])
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false)
+        })
+        .count()
 }
 
 fn check_tools(fix: bool) -> DiagResult {

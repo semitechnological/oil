@@ -146,16 +146,16 @@ Some bottles (e.g., jq, wget) contain placeholder paths:
 @@HOMEBREW_PREFIX@@/opt/oniguruma/lib/libonig.5.dylib
 ```
 
-Homebrew replaces these during installation. Wax does not currently implement this relocation step, so some formulae with shared library dependencies may not work correctly.
+Homebrew replaces these during installation. Wax now performs best-effort relocation, though some formulae with complex shared library dependencies may still not work correctly.
 
 **Impact**: Formulae with complex library dependencies may fail at runtime.
 
-**Mitigation**: This is a known Homebrew bottle feature. Future implementation could use install_name_tool on macOS to fix library paths.
+**Mitigation**: This is a known Homebrew bottle feature. Existing relocation should be expanded as incompatible bottles are found.
 
 ### 2. Post-Install Scripts
-Homebrew bottles can have post-install scripts (e.g., for service registration). Wax does not execute these.
+Homebrew bottles can have post-install scripts (e.g., for service registration). Wax can run supported post-install hooks when a compatible `brew postinstall` command is installed, and `--no-script` skips automatic post-install work.
 
-**Impact**: Some formulae requiring post-install setup may not work.
+**Impact**: Some formulae requiring native post-install behavior may not work.
 
 ### 3. Caveats
 Homebrew shows installation caveats (manual steps). Wax does not display these.
@@ -189,7 +189,7 @@ Parallel downloads show ~3-5x speedup for multi-dependency installations.
 - `Cargo.toml` - Added futures dependency
 
 ### Test Files
-- `test_phase2.sh` - Integration test script
+- `tests/cli.rs` - CLI integration tests
 
 ## Dependencies Added
 - `futures = "0.3"` - For async stream processing
@@ -207,8 +207,8 @@ Parallel downloads show ~3-5x speedup for multi-dependency installations.
 - App bundle copying to /Applications
 
 ### Potential Improvements
-1. Implement binary relocation for @@HOMEBREW_*@@ placeholders
-2. Execute post-install scripts
+1. Expand binary relocation coverage for @@HOMEBREW_*@@ placeholders
+2. Add sandboxed native post-install script execution
 3. Display caveats after installation
 4. Better error messages with suggestions
 5. Resume interrupted downloads
