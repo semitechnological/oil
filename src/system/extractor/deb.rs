@@ -290,7 +290,7 @@ mod tests {
         let debian_binary = b"2.0\n";
         deb.extend_from_slice(&make_ar_header("debian-binary", debian_binary.len() as u64));
         deb.extend_from_slice(debian_binary);
-        if debian_binary.len() % 2 != 0 {
+        if !debian_binary.len().is_multiple_of(2) {
             deb.push(b'\n');
         }
 

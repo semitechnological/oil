@@ -1,5 +1,7 @@
 use crate::api::{CaskArtifact, Formula};
-use crate::bottle::{detect_platform, should_prefer_source_build, BottleDownloader, DownloadTotals};
+use crate::bottle::{
+    detect_platform, should_prefer_source_build, BottleDownloader, DownloadTotals,
+};
 use crate::builder::Builder;
 use crate::cache::Cache;
 use crate::cask::{
@@ -600,8 +602,7 @@ async fn install_impl(
                 v.push(spec.name);
                 continue;
             }
-            if crate::ecosystem_install::install_one_qualified(cache, name, dry_run, false).await?
-            {
+            if crate::ecosystem_install::install_one_qualified(cache, name, dry_run, false).await? {
                 continue;
             }
             v.push(spec.name);
@@ -1383,7 +1384,7 @@ pub async fn install_extracted_bottle(
     } else if name_dir.exists() {
         copy_dir_all(&name_dir, &formula_cellar)?;
     } else {
-        copy_dir_all(&extract_dir.to_path_buf(), &formula_cellar)?;
+        copy_dir_all(extract_dir, &formula_cellar)?;
     }
 
     step!("relocating...");

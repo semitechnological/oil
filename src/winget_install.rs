@@ -43,7 +43,11 @@ fn package_id_to_content_path(id: &str) -> Result<String> {
 fn github_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
-        .user_agent(concat!("wax/", env!("CARGO_PKG_VERSION"), " (winget-resolve)"))
+        .user_agent(concat!(
+            "wax/",
+            env!("CARGO_PKG_VERSION"),
+            " (winget-resolve)"
+        ))
         .build()
         .map_err(|e| WaxError::InstallError(e.to_string()))
 }
@@ -81,7 +85,10 @@ pub async fn winget_package_exists(package_id: &str) -> bool {
         return false;
     };
     let url = format!("{WINGET_PKGS_REPO_CONTENTS}/{path}?ref=master");
-    gh_get_json(&url).await.map(|v| !v.is_empty()).unwrap_or(false)
+    gh_get_json(&url)
+        .await
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
 }
 
 fn winget_arch_token() -> &'static str {
@@ -188,20 +195,15 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     }
 
     let inst = pick_installer(&doc)?;
-    let sha_expected = inst
-        .installer_sha256
-        .trim()
-        .to_ascii_lowercase();
+    let sha_expected = inst.installer_sha256.trim().to_ascii_lowercase();
 
     let tmp = TempDir::new()?;
     let archive_path = tmp.path().join("winget.zip");
 
     let dl = BottleDownloader::new();
     let size = dl.probe_size(&inst.installer_url).await;
-    let conns = BottleDownloader::num_connections(
-        size,
-        BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD,
-    );
+    let conns =
+        BottleDownloader::num_connections(size, BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD);
     let pb = ProgressBar::new(0);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -221,10 +223,7 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     std::fs::create_dir_all(&extract_root)?;
     scoop::extract_zip_file(&archive_path, &extract_root)?;
 
-    let bin_dir = dirs::home_dir()?
-        .join(".local")
-        .join("wax")
-        .join("bin");
+    let bin_dir = dirs::home_dir()?.join(".local").join("wax").join("bin");
     std::fs::create_dir_all(&bin_dir)?;
 
     let nested_files = doc.nested_installer_files.as_ref().ok_or_else(|| {

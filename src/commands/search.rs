@@ -154,10 +154,13 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
         .collect();
 
     let include_scoop = eco_filter.map(|e| e == Ecosystem::Scoop).unwrap_or(true);
-    let include_choco = eco_filter.map(|e| e == Ecosystem::Chocolatey).unwrap_or(true);
+    let include_choco = eco_filter
+        .map(|e| e == Ecosystem::Chocolatey)
+        .unwrap_or(true);
     let include_winget = eco_filter.map(|e| e == Ecosystem::Winget).unwrap_or(true);
 
-    let mut remote_hits = collect_remote_hits(cache, q, include_scoop, include_choco, include_winget).await?;
+    let mut remote_hits =
+        collect_remote_hits(cache, q, include_scoop, include_choco, include_winget).await?;
     remote_hits.retain(|h| !brew_blocklist.contains(&h.id.to_lowercase()));
     remote_hits = dedupe_remote_by_speed(remote_hits);
 
@@ -290,10 +293,15 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
     }
 
     print_remote_hits(&remote_hits);
-    if !remote_hits.is_empty() && std::env::var("GITHUB_TOKEN").map(|v| v.is_empty()).unwrap_or(true) {
+    if !remote_hits.is_empty()
+        && std::env::var("GITHUB_TOKEN")
+            .map(|v| v.is_empty())
+            .unwrap_or(true)
+    {
         println!(
             "\n{}",
-            style("Tip: set GITHUB_TOKEN for broader winget-pkgs code search in unified mode.").dim()
+            style("Tip: set GITHUB_TOKEN for broader winget-pkgs code search in unified mode.")
+                .dim()
         );
     }
 

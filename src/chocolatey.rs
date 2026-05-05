@@ -74,10 +74,8 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
 
     let dl = BottleDownloader::new();
     let size = dl.probe_size(&nupkg_url).await;
-    let conns = BottleDownloader::num_connections(
-        size,
-        BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD,
-    );
+    let conns =
+        BottleDownloader::num_connections(size, BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD);
     let pb = ProgressBar::new(0);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -87,7 +85,8 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     );
     pb.set_message(id.to_string());
 
-    dl.download(&nupkg_url, &nupkg_path, Some(&pb), conns, None).await?;
+    dl.download(&nupkg_url, &nupkg_path, Some(&pb), conns, None)
+        .await?;
     pb.finish_and_clear();
 
     let extract_root = tmp.path().join("nupkg");
@@ -97,7 +96,8 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     let tools_dir = extract_root.join("tools");
     if !tools_dir.is_dir() {
         return Err(WaxError::InstallError(
-            "Chocolatey package has no tools/ directory in .nupkg (wax cannot run install scripts)".into(),
+            "Chocolatey package has no tools/ directory in .nupkg (wax cannot run install scripts)"
+                .into(),
         ));
     }
 

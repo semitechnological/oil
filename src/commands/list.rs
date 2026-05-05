@@ -352,11 +352,7 @@ async fn list_upgradable(cache: &Cache) -> Result<()> {
 }
 
 #[instrument(skip(cache))]
-pub async fn list(
-    cache: &Cache,
-    query: Option<String>,
-    upgradable: bool,
-) -> Result<()> {
+pub async fn list(cache: &Cache, query: Option<String>, upgradable: bool) -> Result<()> {
     if upgradable {
         return list_upgradable(cache).await;
     }

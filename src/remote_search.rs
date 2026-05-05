@@ -68,9 +68,8 @@ async fn load_or_fetch_scoop_index(cache_dir: &std::path::Path) -> Result<Vec<St
         .build()
         .map_err(|e| crate::error::WaxError::InstallError(e.to_string()))?;
 
-    let mut req = client.get(
-        "https://api.github.com/repos/ScoopInstaller/Main/git/trees/master?recursive=1",
-    );
+    let mut req =
+        client.get("https://api.github.com/repos/ScoopInstaller/Main/git/trees/master?recursive=1");
     if let Ok(token) = std::env::var("GITHUB_TOKEN") {
         if !token.is_empty() {
             req = req.header("Authorization", format!("Bearer {token}"));
@@ -171,7 +170,11 @@ async fn search_winget_github(query: &str, limit: usize) -> Result<Vec<RemoteHit
     let url = format!("https://api.github.com/search/code?q={q}&per_page={limit}");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
-        .user_agent(concat!("wax/", env!("CARGO_PKG_VERSION"), " (winget-search)"))
+        .user_agent(concat!(
+            "wax/",
+            env!("CARGO_PKG_VERSION"),
+            " (winget-search)"
+        ))
         .build()
         .map_err(|e| crate::error::WaxError::InstallError(e.to_string()))?;
 

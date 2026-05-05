@@ -3,8 +3,8 @@ mod bottle;
 mod builder;
 mod cache;
 mod cask;
-mod commands;
 mod chocolatey;
+mod commands;
 mod deps;
 mod discovery;
 mod ecosystem_install;
@@ -156,7 +156,9 @@ enum Commands {
     #[command(visible_alias = "i")]
     #[command(alias = "add")]
     Install {
-        #[arg(help = "Package name(s); optional prefix scoop/, choco/, chocolatey/, winget/, brew/ (Windows auto-resolve if omitted)")]
+        #[arg(
+            help = "Package name(s); optional prefix scoop/, choco/, chocolatey/, winget/, brew/ (Windows auto-resolve if omitted)"
+        )]
         packages: Vec<String>,
         #[arg(long)]
         dry_run: bool,
@@ -393,20 +395,33 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum SystemAction {
+    #[command(about = "Search OS packages via the native package manager")]
+    Search {
+        #[arg(help = "Package search query")]
+        query: String,
+        #[arg(long, default_value_t = 20, help = "Maximum number of results")]
+        limit: usize,
+    },
     #[command(about = "Upgrade all OS packages via the native package manager")]
     Upgrade,
     #[command(about = "Install packages via the native package manager")]
     Install {
         #[arg(required = true, help = "Package name(s) to install")]
         packages: Vec<String>,
-        #[arg(long, help = "Download and extract packages directly from registry (nix-like, bypasses host PM)")]
+        #[arg(
+            long,
+            help = "Download and extract packages directly from registry (nix-like, bypasses host PM)"
+        )]
         direct: bool,
     },
     #[command(about = "Declare and install packages (adds to desired state)")]
     Add {
         #[arg(required = true, help = "Package name(s) to add")]
         packages: Vec<String>,
-        #[arg(long, help = "Download and extract packages directly from registry (nix-like, bypasses host PM)")]
+        #[arg(
+            long,
+            help = "Download and extract packages directly from registry (nix-like, bypasses host PM)"
+        )]
         direct: bool,
     },
     #[command(about = "Remove packages and drop from desired state")]
@@ -619,10 +634,9 @@ async fn main() -> Result<()> {
         Commands::Info { formula, cask } => {
             commands::info::info(&api_client, &cache, &formula, cask).await
         }
-        Commands::List {
-            query,
-            upgradable,
-        } => commands::list::list(&cache, query, upgradable).await,
+        Commands::List { query, upgradable } => {
+            commands::list::list(&cache, query, upgradable).await
+        }
         Commands::Install {
             packages,
             dry_run,
@@ -717,34 +731,45 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::System { action } => match action {
+            SystemAction::Search { query, limit } => match system::SystemManager::detect().await? {
+                Some(mgr) => mgr.search(&query, limit).await,
+                None => {
+                    eprintln!("no supported system package manager found");
+                    Ok(())
+                }
+            },
             SystemAction::Upgrade => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.upgrade_all().await,
                 None => handle_system_upgrade().await,
             },
-            SystemAction::Install { packages, direct } => match system::SystemManager::detect().await? {
-                Some(mgr) => {
-                    if direct {
-                        mgr.install_direct(&packages, false).await
-                    } else {
-                        mgr.install(&packages).await
+            SystemAction::Install { packages, direct } => {
+                match system::SystemManager::detect().await? {
+                    Some(mgr) => {
+                        if direct {
+                            mgr.install_direct(&packages, false).await
+                        } else {
+                            mgr.install(&packages).await
+                        }
                     }
+                    None => Err(crate::error::WaxError::PlatformNotSupported(
+                        "No supported system package manager found".to_string(),
+                    )),
                 }
-                None => Err(crate::error::WaxError::PlatformNotSupported(
-                    "No supported system package manager found".to_string(),
-                )),
-            },
-            SystemAction::Add { packages, direct } => match system::SystemManager::detect().await? {
-                Some(mgr) => {
-                    if direct {
-                        mgr.install_direct(&packages, true).await
-                    } else {
-                        mgr.add(&packages).await
+            }
+            SystemAction::Add { packages, direct } => {
+                match system::SystemManager::detect().await? {
+                    Some(mgr) => {
+                        if direct {
+                            mgr.install_direct(&packages, true).await
+                        } else {
+                            mgr.add(&packages).await
+                        }
                     }
+                    None => Err(crate::error::WaxError::PlatformNotSupported(
+                        "No supported system package manager found".to_string(),
+                    )),
                 }
-                None => Err(crate::error::WaxError::PlatformNotSupported(
-                    "No supported system package manager found".to_string(),
-                )),
-            },
+            }
             SystemAction::Remove { packages } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.remove(&packages).await,
                 None => Err(crate::error::WaxError::PlatformNotSupported(

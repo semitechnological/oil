@@ -7,7 +7,7 @@
 /// the live system to the target generation's package set.
 use crate::error::{Result, WaxError};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn generations_dir() -> Result<PathBuf> {
     let home = std::env::var("HOME").map_err(|_| WaxError::InstallError("HOME not set".into()))?;
@@ -17,7 +17,7 @@ fn generations_dir() -> Result<PathBuf> {
         .join("generations"))
 }
 
-fn current_link(dir: &PathBuf) -> PathBuf {
+fn current_link(dir: &Path) -> PathBuf {
     dir.join("current")
 }
 

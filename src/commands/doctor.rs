@@ -1,7 +1,5 @@
 use crate::api::ApiClient;
-use crate::bottle::{
-    detect_platform, homebrew_prefix, run_command_with_timeout, BottleDownloader,
-};
+use crate::bottle::{detect_platform, homebrew_prefix, run_command_with_timeout, BottleDownloader};
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::error::Result;

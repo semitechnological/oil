@@ -267,8 +267,9 @@ pub(crate) fn extract_zip_file(zip_path: &Path, dest_dir: &Path) -> Result<()> {
         zip::ZipArchive::new(file).map_err(|e| WaxError::InstallError(e.to_string()))?;
 
     for i in 0..archive.len() {
-        let mut entry =
-            archive.by_index(i).map_err(|e| WaxError::InstallError(e.to_string()))?;
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| WaxError::InstallError(e.to_string()))?;
         let rel = match entry.enclosed_name() {
             Some(p) => p.to_path_buf(),
             None => continue,
@@ -322,10 +323,8 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
 
     let dl = BottleDownloader::new();
     let size = dl.probe_size(&resolved.download_url).await;
-    let conns = BottleDownloader::num_connections(
-        size,
-        BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD,
-    );
+    let conns =
+        BottleDownloader::num_connections(size, BottleDownloader::MAX_CONNECTIONS_PER_DOWNLOAD);
     let pb = ProgressBar::new(0);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -359,7 +358,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
     if version_dir.exists() {
         std::fs::remove_dir_all(&version_dir)?;
     }
-    std::fs::create_dir_all(&version_dir.parent().unwrap())?;
+    std::fs::create_dir_all(version_dir.parent().unwrap())?;
 
     let source_tree = match &resolved.extract_dir {
         Some(d) => extract_root.join(d.replace('\\', "/")),
@@ -411,7 +410,10 @@ fn wax_user_root() -> Result<PathBuf> {
 }
 
 fn resolved_staging_dir(package: &str, version: &str) -> Result<PathBuf> {
-    Ok(wax_user_root()?.join("scoop-apps").join(package).join(version))
+    Ok(wax_user_root()?
+        .join("scoop-apps")
+        .join(package)
+        .join(version))
 }
 
 fn wax_bin_dir() -> Result<PathBuf> {

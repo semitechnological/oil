@@ -56,7 +56,9 @@ pub async fn install_one_qualified(
 fn validate_qualified_inner(spec: &PackageSpec) -> Result<()> {
     let n = spec.name.trim();
     if n.is_empty() {
-        return Err(WaxError::InvalidInput("empty package name after prefix".into()));
+        return Err(WaxError::InvalidInput(
+            "empty package name after prefix".into(),
+        ));
     }
     if spec.force.is_some() && n.contains('/') {
         return Err(WaxError::InvalidInput(

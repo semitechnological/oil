@@ -1321,17 +1321,13 @@ pub fn managed_homebrew_prefix() -> Option<PathBuf> {
         }
     }
 
-    for candidate in [
+    [
         PathBuf::from("/opt/homebrew"),
         PathBuf::from("/usr/local"),
         PathBuf::from("/home/linuxbrew/.linuxbrew"),
-    ] {
-        if candidate.join("Cellar").exists() {
-            return Some(candidate);
-        }
-    }
-
-    None
+    ]
+    .into_iter()
+    .find(|candidate| candidate.join("Cellar").exists())
 }
 
 pub fn should_prefer_source_build() -> bool {

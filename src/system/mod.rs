@@ -369,8 +369,7 @@ impl SystemManager {
         .await?;
 
         let prefix = SystemInstaller::install_prefix();
-        let metadata: Vec<PackageMetadata> =
-            resolved.iter().map(|&p| p.clone()).collect();
+        let metadata: Vec<PackageMetadata> = resolved.iter().map(|&p| p.clone()).collect();
         let installed = self.installer.install_packages(&metadata, &prefix).await?;
 
         let mut state = SystemState::load().await?;
@@ -488,6 +487,37 @@ impl SystemManager {
             }
         }
 
+        Ok(())
+    }
+
+    pub async fn search(&self, query: &str, limit: usize) -> Result<()> {
+        let results = self.pm.search(query, limit).await?;
+        if results.is_empty() {
+            println!("no system packages found for {}", style(query).magenta());
+            return Ok(());
+        }
+
+        println!(
+            "{} {} results via {}",
+            style("→").cyan(),
+            style(results.len()).bold(),
+            style(self.pm.name()).cyan()
+        );
+        for result in results {
+            match (result.version, result.summary) {
+                (Some(version), Some(summary)) => println!(
+                    "{} {} {}",
+                    style(result.name).magenta(),
+                    style(version).dim(),
+                    summary
+                ),
+                (Some(version), None) => {
+                    println!("{} {}", style(result.name).magenta(), style(version).dim())
+                }
+                (None, Some(summary)) => println!("{} {}", style(result.name).magenta(), summary),
+                (None, None) => println!("{}", style(result.name).magenta()),
+            }
+        }
         Ok(())
     }
 

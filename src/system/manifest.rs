@@ -101,8 +101,9 @@ impl FileManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
     use tempfile::TempDir;
+    use tokio::sync::Mutex;
 
     fn home_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -111,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_and_load() {
-        let _guard = home_lock().lock().unwrap();
+        let _guard = home_lock().lock().await;
         let tmp = TempDir::new().unwrap();
         std::env::set_var("HOME", tmp.path());
 
@@ -139,7 +140,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_nonexistent() {
-        let _guard = home_lock().lock().unwrap();
+        let _guard = home_lock().lock().await;
         let tmp = TempDir::new().unwrap();
         std::env::set_var("HOME", tmp.path());
 
