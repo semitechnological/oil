@@ -557,6 +557,19 @@ pub async fn install_quiet_with_progress(
     .await
 }
 
+fn tap_name_from_qualified_package(package_name: &str) -> Option<String> {
+    let mut parts = package_name.split('/');
+    let user = parts.next()?;
+    let repo = parts.next()?;
+    let formula = parts.next()?;
+
+    if user.is_empty() || repo.is_empty() || formula.is_empty() {
+        return None;
+    }
+
+    Some(format!("{}/{}", user, repo))
+}
+
 async fn install_impl(
     cache: &Cache,
     package_names: &[String],
@@ -597,6 +610,23 @@ async fn install_impl(
 
     let mut tap_manager = TapManager::new()?;
     tap_manager.load().await?;
+
+    if !dry_run {
+        let mut tapped = HashSet::new();
+        for package_name in package_names {
+            if let Some(tap_name) = tap_name_from_qualified_package(package_name) {
+                if tapped.contains(&tap_name) || tap_manager.has_tap(&tap_name).await {
+                    continue;
+                }
+                if !quiet {
+                    println!("tapping {}", style(&tap_name).cyan());
+                }
+                tap_manager.add_tap(&tap_name).await?;
+                cache.invalidate_tap_cache(&tap_name).await?;
+                tapped.insert(tap_name);
+            }
+        }
+    }
 
     let formulae = cache.load_all_formulae().await?;
     let state = InstallState::new()?;
@@ -2245,4 +2275,23 @@ async fn install_from_downloaded(
         },
         app_name: installed_app_name,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tap_name_from_qualified_package;
+
+    #[test]
+    fn tap_name_from_qualified_package_uses_first_two_segments() {
+        assert_eq!(
+            tap_name_from_qualified_package("user/tap/package"),
+            Some("user/tap".to_string())
+        );
+    }
+
+    #[test]
+    fn tap_name_from_qualified_package_rejects_unqualified_names() {
+        assert_eq!(tap_name_from_qualified_package("package"), None);
+        assert_eq!(tap_name_from_qualified_package("user/tap"), None);
+    }
 }
