@@ -1,6 +1,7 @@
 use super::{PackageIndex, PackageMetadata};
 use crate::error::{Result, WaxError};
 use flate2::read::GzDecoder;
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::io::Read;
@@ -329,7 +330,11 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
             }
             Ok(Event::Text(ref e)) => {
                 if in_package {
-                    let text = e.unescape().unwrap_or_default().to_string();
+                    let text = e
+                        .decode()
+                        .ok()
+                        .and_then(|text| unescape(&text).ok().map(|text| text.into_owned()))
+                        .unwrap_or_default();
                     match current_tag.as_str() {
                         "name" => name = text,
                         "summary" => {
