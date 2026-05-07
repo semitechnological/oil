@@ -16,6 +16,12 @@ pub enum BuildSystem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinInstall {
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormulaSource {
     pub url: String,
     pub sha256: String,
@@ -38,6 +44,7 @@ pub struct ParsedFormula {
     pub configure_args: Vec<String>,
     /// Files to copy to `bin/` via `bin.install "..."` (binary-release formulas).
     pub bin_installs: Vec<String>,
+    pub bin_install_targets: Vec<BinInstall>,
 }
 
 pub struct FormulaParser;
@@ -102,7 +109,11 @@ impl FormulaParser {
         let build_system = Self::detect_build_system(&install_block);
         let configure_args = Self::extract_configure_args(&install_block);
         let install_commands = Self::extract_install_commands(&install_block);
-        let bin_installs = Self::extract_bin_installs(&install_block);
+        let bin_install_targets = Self::extract_bin_install_targets(&install_block);
+        let bin_installs = bin_install_targets
+            .iter()
+            .map(|target| target.source.clone())
+            .collect();
 
         Ok(ParsedFormula {
             name: name.to_string(),
@@ -121,6 +132,7 @@ impl FormulaParser {
             install_commands,
             configure_args,
             bin_installs,
+            bin_install_targets,
         })
     }
 
@@ -308,11 +320,39 @@ impl FormulaParser {
     }
 
     /// Parse `bin.install "filename"` entries from a formula install block.
-    pub(crate) fn extract_bin_installs(install_block: &str) -> Vec<String> {
-        let re = Regex::new(r#"bin\.install\s+"([^"]+)""#).unwrap();
-        re.captures_iter(install_block)
-            .map(|c| c[1].to_string())
-            .collect()
+    pub(crate) fn extract_bin_install_targets(install_block: &str) -> Vec<BinInstall> {
+        let re = Regex::new(r#"bin\.install\s+"([^"]+)"(?:\s*=>\s*"([^"]+)")?"#).unwrap();
+        let dir_re =
+            Regex::new(r#"bin\.install\s+Dir\["([^"]+)"\]\.first(?:\s*=>\s*"([^"]+)")?"#).unwrap();
+        let mut targets: Vec<BinInstall> = re
+            .captures_iter(install_block)
+            .map(|c| {
+                let source = c[1].to_string();
+                let destination = c.get(2).map(|m| m.as_str().to_string()).unwrap_or_else(|| {
+                    source
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(source.as_str())
+                        .to_string()
+                });
+                BinInstall {
+                    destination,
+                    source,
+                }
+            })
+            .collect();
+        targets.extend(dir_re.captures_iter(install_block).map(|c| {
+            let source = c[1].to_string();
+            let destination = c
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_else(|| source.clone());
+            BinInstall {
+                destination,
+                source,
+            }
+        }));
+        targets
     }
 
     /// For formulas with `on_linux`/`on_macos`/`on_arm`/`on_intel` conditional blocks,
@@ -755,11 +795,36 @@ end
     bin.install "poke-around-bridge.js"
     bin.install "menubar_linux.py" if File.exist?("menubar_linux.py")
 "#;
-        let bins = FormulaParser::extract_bin_installs(install_block);
+        let bins: Vec<String> = FormulaParser::extract_bin_install_targets(install_block)
+            .into_iter()
+            .map(|target| target.source)
+            .collect();
         assert_eq!(
             bins,
             vec!["poke-around", "poke-around-bridge.js", "menubar_linux.py"]
         );
+    }
+
+    #[test]
+    fn extract_bin_install_targets_finds_renames() {
+        let install_block = r#"
+    bin.install "drift-wallpaper-macos-aarch64" => "drift-wallpaper"
+"#;
+        let bins = FormulaParser::extract_bin_install_targets(install_block);
+        assert_eq!(bins.len(), 1);
+        assert_eq!(bins[0].source, "drift-wallpaper-macos-aarch64");
+        assert_eq!(bins[0].destination, "drift-wallpaper");
+    }
+
+    #[test]
+    fn extract_bin_install_targets_finds_dir_first_renames() {
+        let install_block = r#"
+    bin.install Dir["drift-wallpaper-*"].first => "drift-wallpaper"
+"#;
+        let bins = FormulaParser::extract_bin_install_targets(install_block);
+        assert_eq!(bins.len(), 1);
+        assert_eq!(bins[0].source, "drift-wallpaper-*");
+        assert_eq!(bins[0].destination, "drift-wallpaper");
     }
 
     #[test]
@@ -768,7 +833,7 @@ end
     system "./configure", "--prefix=#{prefix}"
     system "make", "install"
 "#;
-        assert!(FormulaParser::extract_bin_installs(install_block).is_empty());
+        assert!(FormulaParser::extract_bin_install_targets(install_block).is_empty());
     }
 
     #[test]

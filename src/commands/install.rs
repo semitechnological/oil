@@ -144,10 +144,23 @@ async fn install_from_source_task(
         let install_prefix = temp_dir.path().join("install");
         let bin_dir = install_prefix.join("bin");
         tokio::fs::create_dir_all(&bin_dir).await?;
-        for file in &parsed_formula.bin_installs {
-            let src = src_dir.join(file);
+        let mut copied_bins = 0usize;
+        let mut missing_bins = Vec::new();
+        for target in &parsed_formula.bin_install_targets {
+            let dest_path = Path::new(&target.destination);
+            if dest_path.is_absolute() || target.destination.split('/').any(|part| part == "..") {
+                return Err(WaxError::BuildError(format!(
+                    "Formula '{}' has invalid bin.install destination '{}'",
+                    formula.name, target.destination
+                )));
+            }
+
+            let src = resolve_bin_install_source(&src_dir, &target.source).await?;
             if src.exists() {
-                let dst = bin_dir.join(file);
+                let dst = bin_dir.join(&target.destination);
+                if let Some(parent) = dst.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
                 tokio::fs::copy(&src, &dst).await?;
                 #[cfg(unix)]
                 {
@@ -156,7 +169,24 @@ async fn install_from_source_task(
                     perms.set_mode(perms.mode() | 0o111);
                     tokio::fs::set_permissions(&dst, perms).await?;
                 }
+                copied_bins += 1;
+            } else {
+                missing_bins.push(target.source.clone());
             }
+        }
+        if !missing_bins.is_empty() {
+            return Err(WaxError::BuildError(format!(
+                "Formula '{}' is broken: bin.install target(s) not found after extracting {}: {}",
+                formula.name,
+                dl_url,
+                missing_bins.join(", ")
+            )));
+        }
+        if copied_bins == 0 {
+            return Err(WaxError::BuildError(format!(
+                "Formula '{}' is broken: no bin.install targets were installed",
+                formula.name
+            )));
         }
 
         spinner.set_message("Installing to Cellar...");
@@ -285,6 +315,39 @@ async fn install_from_source_task(
     );
 
     Ok(())
+}
+
+async fn resolve_bin_install_source(root: &Path, source: &str) -> Result<std::path::PathBuf> {
+    if !source.contains('*') {
+        return Ok(root.join(source));
+    }
+    let source_path = Path::new(source);
+    if source_path.components().count() != 1 {
+        return Err(WaxError::BuildError(format!(
+            "Unsupported bin.install glob '{}'",
+            source
+        )));
+    }
+    let Some((prefix, suffix)) = source.split_once('*') else {
+        return Ok(root.join(source));
+    };
+    let mut matches = Vec::new();
+    let mut entries = tokio::fs::read_dir(root).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        if name.starts_with(prefix) && name.ends_with(suffix) {
+            matches.push(entry.path());
+        }
+    }
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Ok(root.join(source)),
+        _ => Err(WaxError::BuildError(format!(
+            "Formula bin.install glob '{}' matched multiple files",
+            source
+        ))),
+    }
 }
 
 /// Clone and build from a formula's HEAD git URL.
