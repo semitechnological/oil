@@ -135,6 +135,8 @@ wax upgrade              # upgrade all outdated packages
 wax upgrade nginx        # upgrade specific package
 wax upgrade nginx tree   # upgrade multiple packages
 wax upgrade --self       # upgrade wax itself
+wax upgrade -s -n        # nightly self-upgrade from GitHub HEAD
+wax up -sn               # same as above
 wax up nginx             # shorthand
 
 # Generate lockfile

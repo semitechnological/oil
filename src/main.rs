@@ -213,8 +213,17 @@ enum Commands {
     Upgrade {
         #[arg(help = "Package name(s) to upgrade (upgrades all if omitted)")]
         packages: Vec<String>,
-        #[arg(long = "self", help = "Upgrade wax itself")]
+        #[arg(short = 's', long = "self", help = "Upgrade wax itself")]
         upgrade_self: bool,
+        #[arg(short, long, help = "Use nightly build from GitHub (with --self)")]
+        nightly: bool,
+        #[arg(
+            long,
+            help = "After nightly self-update, clean Cargo git cache for wax"
+        )]
+        clean: bool,
+        #[arg(long, help = "After nightly self-update, keep Cargo git cache")]
+        no_clean: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(
@@ -601,16 +610,35 @@ async fn main() -> Result<()> {
         Commands::Upgrade {
             packages,
             upgrade_self,
+            nightly,
+            clean,
+            no_clean,
             dry_run,
             system,
         } => {
             if upgrade_self {
-                commands::self_update::self_update(
-                    commands::self_update::Channel::Stable,
-                    false,
-                    None,
-                )
-                .await?;
+                if clean && no_clean {
+                    return Err(error::WaxError::InvalidInput(
+                        "Cannot specify both --clean and --no-clean".to_string(),
+                    ));
+                }
+                let channel = if nightly {
+                    commands::self_update::Channel::Nightly
+                } else {
+                    commands::self_update::Channel::Stable
+                };
+                let nightly_cleanup = if nightly {
+                    if clean {
+                        Some(true)
+                    } else if no_clean {
+                        Some(false)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                commands::self_update::self_update(channel, false, nightly_cleanup).await?;
                 return Ok(());
             }
 

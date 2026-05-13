@@ -94,6 +94,25 @@ fn install_help_mentions_no_script_flag() {
     assert!(stdout.contains("--no-script"), "{stdout}");
 }
 
+#[test]
+fn update_help_mentions_self_nightly_shorts() {
+    let out = wax().args(["update", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("-s"), "{stdout}");
+    assert!(stdout.contains("-n"), "{stdout}");
+}
+
+#[test]
+fn upgrade_help_mentions_self_nightly_shorts() {
+    let out = wax().args(["upgrade", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("-s"), "{stdout}");
+    assert!(stdout.contains("-n"), "{stdout}");
+    assert!(stdout.contains("--clean"), "{stdout}");
+}
+
 // ── list / tap list work offline ─────────────────────────────────────────────
 
 #[test]
