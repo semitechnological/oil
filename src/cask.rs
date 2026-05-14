@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
+use std::sync::OnceLock;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
@@ -22,6 +23,12 @@ pub struct InstalledCask {
     pub binary_paths: Option<Vec<String>>,
     #[serde(default)]
     pub app_name: Option<String>,
+}
+
+static CASK_STATE_WRITE_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn cask_state_write_lock() -> &'static tokio::sync::Mutex<()> {
+    CASK_STATE_WRITE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 pub struct CaskState {
@@ -144,6 +151,7 @@ impl CaskState {
     }
 
     pub async fn add(&self, cask: InstalledCask) -> Result<()> {
+        let _guard = cask_state_write_lock().lock().await;
         let mut casks = self.load().await?;
 
         // Also create Caskroom structure
@@ -175,6 +183,7 @@ impl CaskState {
     }
 
     pub async fn remove(&self, name: &str) -> Result<()> {
+        let _guard = cask_state_write_lock().lock().await;
         let mut casks = self.load().await?;
 
         let caskroom = Self::caskroom_dir();
