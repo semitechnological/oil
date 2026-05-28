@@ -11,9 +11,7 @@ use crate::discovery::discover_manually_installed_casks;
 use crate::error::{Result, WaxError};
 use crate::formula_parser::{BuildSystem, FormulaParser};
 use crate::install::{create_symlinks, InstallMode, InstallState, InstalledPackage};
-use crate::signal::{
-    check_cancelled, clear_active_multi, set_active_multi, CriticalSection,
-};
+use crate::signal::{check_cancelled, clear_active_multi, set_active_multi, CriticalSection};
 use crate::system_pm::SystemPm;
 use crate::tap::TapManager;
 use crate::ui::{
@@ -1803,7 +1801,7 @@ async fn install_casks(
                             style(&details.version).dim()
                         ));
                     }
-                    Ok((name, installed_cask))
+                    Ok((name, installed_cask, details))
                 }
                 Err(e) => Err(CaskPipelineFail::Install { name, err: e }),
             }
@@ -1811,11 +1809,11 @@ async fn install_casks(
     }
 
     let mut pipeline_outcomes = Vec::new();
-    let mut successful_casks: Vec<(String, InstalledCask)> = Vec::new();
+    let mut successful_casks: Vec<(String, InstalledCask, crate::api::CaskDetails)> = Vec::new();
     while let Some(join_res) = pipeline_tasks.join_next().await {
         match join_res {
-            Ok(Ok((name, installed_cask))) => {
-                successful_casks.push((name, installed_cask));
+            Ok(Ok((name, installed_cask, details))) => {
+                successful_casks.push((name, installed_cask, details));
             }
             Ok(Err(e)) => pipeline_outcomes.push(Err(e)),
             Err(e) => eprintln!("{} task error: {}", style("✗").red(), e),
@@ -1825,8 +1823,11 @@ async fn install_casks(
     // Serialize cask state updates to avoid file corruption from concurrent writes.
     if !successful_casks.is_empty() {
         let cask_state = CaskState::new().map_err(|e| WaxError::InstallError(e.to_string()))?;
-        for (name, installed_cask) in successful_casks {
-            if let Err(e) = cask_state.add(installed_cask).await {
+        for (name, installed_cask, details) in successful_casks {
+            if let Err(e) = cask_state
+                .add_with_details(installed_cask, Some(&details))
+                .await
+            {
                 pipeline_outcomes.push(Err(CaskPipelineFail::Install { name, err: e }));
             } else {
                 pipeline_outcomes.push(Ok(()));
