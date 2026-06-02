@@ -77,6 +77,16 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
         return Ok(());
     }
 
+    if cfg!(target_os = "linux") && eco_filter.is_none() {
+        return match crate::system::SystemManager::detect().await? {
+            Some(mgr) => mgr.search(q, 20).await,
+            None => {
+                println!("no supported wax system registry found");
+                Ok(())
+            }
+        };
+    }
+
     cache.ensure_fresh().await?;
 
     let formulae = cache.load_all_formulae().await?;

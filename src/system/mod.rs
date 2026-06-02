@@ -67,89 +67,17 @@ impl SystemManager {
     }
 
     pub async fn upgrade_all(&self) -> Result<()> {
-        println!(
-            "{} upgrading managed packages via {}",
-            style("→").cyan(),
-            style(self.pm.name()).bold()
-        );
-
-        self.snapshot("pre-upgrade").await?;
-        self.pm.upgrade_all().await?;
-
-        let mut state = SystemState::load().await?;
-        self.refresh_tracked_state(&mut state).await?;
-        state.save().await?;
-
-        let gen = self
-            .gen_mgr
-            .create("upgrade", state.installed_packages())
-            .await?;
-
-        println!(
-            "  {} generation {} created",
-            style("✓").green(),
-            style(gen.id).bold()
-        );
-        Ok(())
+        Err(WaxError::PlatformNotSupported(
+            "wax direct system upgrade is not implemented yet".to_string(),
+        ))
     }
 
     pub async fn install(&self, packages: &[String]) -> Result<()> {
-        self.apply_install(packages, false).await
+        self.install_native(packages, false).await
     }
 
     pub async fn add(&self, packages: &[String]) -> Result<()> {
-        self.apply_install(packages, true).await
-    }
-
-    async fn apply_install(&self, packages: &[String], declare: bool) -> Result<()> {
-        if packages.is_empty() {
-            return Ok(());
-        }
-
-        self.snapshot(&format!(
-            "pre-{} {}",
-            if declare { "add" } else { "install" },
-            packages.join(" ")
-        ))
-        .await?;
-
-        let mut state = SystemState::load().await?;
-        if declare {
-            for pkg in packages {
-                state.declare(pkg);
-            }
-            state.save().await?;
-        }
-
-        self.pm.install(packages).await?;
-
-        let live = self.live_packages().await?;
-        let live_map: HashMap<String, Option<String>> = live.into_iter().collect();
-        for pkg in packages {
-            let version = live_map.get(pkg).cloned().unwrap_or(None);
-            state.mark_installed(pkg, version, declare || state.is_declared(pkg));
-        }
-        self.refresh_tracked_state(&mut state).await?;
-        state.save().await?;
-
-        let gen = self
-            .gen_mgr
-            .create(
-                &format!(
-                    "{} {}",
-                    if declare { "add" } else { "install" },
-                    packages.join(" ")
-                ),
-                state.installed_packages(),
-            )
-            .await?;
-
-        println!(
-            "  {} generation {} created",
-            style("✓").green(),
-            style(gen.id).bold()
-        );
-        Ok(())
+        self.install_native(packages, true).await
     }
 
     pub async fn remove(&self, packages: &[String]) -> Result<()> {
@@ -246,7 +174,7 @@ impl SystemManager {
             println!("  {} {}", style("+").green(), style(pkg).magenta());
         }
 
-        self.apply_install(&to_install, true).await
+        self.install_native(&to_install, true).await
     }
 
     pub async fn list_generations(&self) -> Result<Vec<Generation>> {
@@ -304,15 +232,7 @@ impl SystemManager {
         if !to_install.is_empty() {
             let names: Vec<String> = to_install.iter().map(|p| p.name.clone()).collect();
             println!("  installing: {}", names.join(", "));
-            self.pm.install(&names).await?;
-            let declared_names: HashSet<String> = state.declared.iter().cloned().collect();
-            for pkg in &to_install {
-                state.mark_installed(
-                    &pkg.name,
-                    pkg.version.clone(),
-                    declared_names.contains(&pkg.name),
-                );
-            }
+            self.install_native(&names, false).await?;
         }
 
         self.refresh_tracked_state(&mut state).await?;
@@ -334,8 +254,8 @@ impl SystemManager {
         Ok(())
     }
 
-    /// Install packages directly from distro registry (bypass host PM).
-    pub async fn install_direct(&self, packages: &[String], declare: bool) -> Result<()> {
+    /// Install packages using Wax's native system package backend.
+    pub async fn install_native(&self, packages: &[String], declare: bool) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -352,17 +272,24 @@ impl SystemManager {
         }
 
         let names: Vec<String> = resolved.iter().map(|p| p.name.clone()).collect();
-        println!(
-            "{} direct-installing {} package(s) via nix-like installer",
-            style("→").cyan(),
-            style(names.len()).bold()
-        );
-        for pkg in &resolved {
-            println!("  {} {}", style("+").green(), style(&pkg.name).magenta());
+        let dep_count = names.len().saturating_sub(packages.len());
+        if dep_count > 0 {
+            println!(
+                "installing {} + {} {}",
+                packages.join(", "),
+                dep_count,
+                if dep_count == 1 {
+                    "dependency"
+                } else {
+                    "dependencies"
+                }
+            );
+        } else {
+            println!("installing {}", packages.join(", "));
         }
 
         self.snapshot(&format!(
-            "pre-direct-{} {}",
+            "pre-{} {}",
             if declare { "add" } else { "install" },
             packages.join(" ")
         ))
@@ -378,8 +305,12 @@ impl SystemManager {
                 state.declare(pkg);
             }
         }
-        for (name, version) in installed {
-            state.mark_installed(&name, Some(version), declare || state.is_declared(&name));
+        for (name, version) in &installed {
+            state.mark_installed(
+                name,
+                Some(version.clone()),
+                declare || state.is_declared(name),
+            );
         }
         self.refresh_tracked_state(&mut state).await?;
         state.save().await?;
@@ -388,7 +319,7 @@ impl SystemManager {
             .gen_mgr
             .create(
                 &format!(
-                    "direct-{} {}",
+                    "{} {}",
                     if declare { "add" } else { "install" },
                     packages.join(" ")
                 ),
@@ -396,11 +327,10 @@ impl SystemManager {
             )
             .await?;
 
-        println!(
-            "  {} generation {} created",
-            style("✓").green(),
-            style(gen.id).bold()
-        );
+        for (name, version) in &installed {
+            println!("+ {}@{}", style(name).magenta(), style(version).dim());
+        }
+        println!("{} snapshot gen-{}", style("→").cyan(), style(gen.id).dim());
         Ok(())
     }
 
@@ -491,48 +421,61 @@ impl SystemManager {
     }
 
     pub async fn search(&self, query: &str, limit: usize) -> Result<()> {
-        let results = self.pm.search(query, limit).await?;
+        let results = self.search_registry(query, limit).await?;
         if results.is_empty() {
             println!("no system packages found for {}", style(query).magenta());
             return Ok(());
         }
 
         println!(
-            "{} {} results via {}",
+            "{} {} results",
             style("→").cyan(),
-            style(results.len()).bold(),
-            style(self.pm.name()).cyan()
+            style(results.len()).bold()
         );
-        for result in results {
-            match (result.version, result.summary) {
-                (Some(version), Some(summary)) => println!(
-                    "{} {} {}",
-                    style(result.name).magenta(),
-                    style(version).dim(),
-                    summary
-                ),
-                (Some(version), None) => {
-                    println!("{} {}", style(result.name).magenta(), style(version).dim())
-                }
-                (None, Some(summary)) => println!("{} {}", style(result.name).magenta(), summary),
-                (None, None) => println!("{}", style(result.name).magenta()),
-            }
+        for pkg in results {
+            println!(
+                "{} {} {}",
+                style(pkg.name).magenta(),
+                style(pkg.version).dim(),
+                pkg.description
+            );
         }
+
         Ok(())
     }
 
+    pub async fn search_registry(&self, query: &str, limit: usize) -> Result<Vec<PackageMetadata>> {
+        let q = query.to_lowercase();
+        let mut results: Vec<_> = self
+            .load_registry()
+            .await?
+            .packages
+            .into_iter()
+            .filter(|pkg| {
+                pkg.name.to_lowercase().contains(&q)
+                    || pkg.description.to_lowercase().contains(&q)
+                    || pkg.provides.iter().any(|p| p.to_lowercase().contains(&q))
+            })
+            .collect();
+
+        results.sort_by(|a, b| {
+            let a_exact = a.name.eq_ignore_ascii_case(query);
+            let b_exact = b.name.eq_ignore_ascii_case(query);
+            b_exact
+                .cmp(&a_exact)
+                .then_with(|| a.name.len().cmp(&b.name.len()))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        results.truncate(limit);
+        Ok(results)
+    }
+
     async fn live_packages(&self) -> Result<Vec<(String, Option<String>)>> {
-        let mut packages = self.pm.list_installed().await?;
-        for manifest in FileManifest::list_all().await? {
-            if let Some(existing) = packages
-                .iter_mut()
-                .find(|(name, _)| *name == manifest.package)
-            {
-                existing.1 = Some(manifest.version.clone());
-            } else {
-                packages.push((manifest.package.clone(), Some(manifest.version.clone())));
-            }
-        }
+        let mut packages: Vec<_> = FileManifest::list_all()
+            .await?
+            .into_iter()
+            .map(|manifest| (manifest.package, Some(manifest.version)))
+            .collect();
         packages.sort_by(|a, b| a.0.cmp(&b.0));
         packages.dedup_by(|a, b| a.0 == b.0);
         Ok(packages)
@@ -574,32 +517,29 @@ impl SystemManager {
     }
 
     async fn remove_managed_packages(&self, packages: &[String]) -> Result<()> {
-        let mut pm_packages = Vec::new();
-
         for package in packages {
-            if let Some(manifest) = FileManifest::load_any_version(package).await? {
-                for file in manifest.files.iter().rev() {
-                    if file.exists() || file.symlink_metadata().is_ok() {
-                        let _ = tokio::fs::remove_file(file).await;
-                    }
-                }
+            let Some(manifest) = FileManifest::load_any_version(package).await? else {
+                return Err(WaxError::InstallError(format!(
+                    "{} is not installed by wax system manager",
+                    package
+                )));
+            };
 
-                let mut dirs = manifest.dirs.clone();
-                dirs.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
-                for dir in &dirs {
-                    let _ = tokio::fs::remove_dir(dir).await;
+            for file in manifest.files.iter().rev() {
+                if file.exists() || file.symlink_metadata().is_ok() {
+                    let _ = tokio::fs::remove_file(file).await;
                 }
-
-                if let Ok(path) = FileManifest::manifest_path_pub(package, &manifest.version) {
-                    let _ = tokio::fs::remove_file(path).await;
-                }
-            } else {
-                pm_packages.push(package.clone());
             }
-        }
 
-        if !pm_packages.is_empty() {
-            self.pm.remove(&pm_packages).await?;
+            let mut dirs = manifest.dirs.clone();
+            dirs.sort_by_key(|b| std::cmp::Reverse(b.components().count()));
+            for dir in &dirs {
+                let _ = tokio::fs::remove_dir(dir).await;
+            }
+
+            if let Ok(path) = FileManifest::manifest_path_pub(package, &manifest.version) {
+                let _ = tokio::fs::remove_file(path).await;
+            }
         }
 
         Ok(())

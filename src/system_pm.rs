@@ -82,6 +82,10 @@ impl SystemPm {
     /// Upgrade all packages managed by this PM.
     /// Streams output directly to the terminal (many upgrade commands are
     /// interactive / produce a lot of output).
+    #[expect(
+        dead_code,
+        reason = "host package upgrades disabled for wax system branch"
+    )]
     pub async fn upgrade_all(&self) -> Result<()> {
         // For apt we need to do "update" then "upgrade" as two steps.
         match self {
@@ -212,6 +216,10 @@ impl SystemPm {
         }
     }
 
+    #[expect(
+        dead_code,
+        reason = "host package search disabled; direct registry search is used"
+    )]
     pub async fn search(&self, query: &str, limit: usize) -> Result<Vec<SystemSearchResult>> {
         let output = match self {
             Self::Brew => run_capture("brew", &["search", query]).await?,
@@ -229,6 +237,10 @@ impl SystemPm {
         Ok(parse_search_results(self, &output, limit))
     }
 
+    #[expect(
+        dead_code,
+        reason = "host package removal disabled; wax removes tracked files"
+    )]
     pub async fn remove(&self, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());

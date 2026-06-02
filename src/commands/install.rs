@@ -635,6 +635,22 @@ fn tap_name_from_qualified_package(package_name: &str) -> Option<String> {
     Some(format!("{}/{}", user, repo))
 }
 
+fn should_use_wax_system_install(
+    package_names: &[String],
+    cask: bool,
+    build_from_source: bool,
+    head: bool,
+) -> bool {
+    if cask || build_from_source || head || !cfg!(target_os = "linux") {
+        return false;
+    }
+
+    package_names.iter().all(|name| {
+        let spec = crate::package_spec::parse_package_spec(name);
+        spec.force.is_none() && !name.contains('/') && !name.contains('@')
+    })
+}
+
 fn hint_user_prefix_path_if_needed(install_mode: InstallMode, quiet: bool) {
     if quiet || install_mode != InstallMode::User {
         return;
@@ -686,6 +702,25 @@ async fn install_impl(
 
     for name in package_names {
         crate::error::validate_package_name(name)?;
+    }
+
+    if should_use_wax_system_install(package_names, cask, build_from_source, head) {
+        if dry_run {
+            if !quiet {
+                for name in package_names {
+                    println!("+ {}", style(name).magenta());
+                }
+                println!("\ndry run - no changes made");
+            }
+            return Ok(());
+        }
+
+        return match crate::system::SystemManager::detect().await? {
+            Some(mgr) => mgr.install(package_names).await,
+            None => Err(WaxError::PlatformNotSupported(
+                "No supported wax system registry found".to_string(),
+            )),
+        };
     }
 
     cache.ensure_fresh().await?;

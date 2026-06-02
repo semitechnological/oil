@@ -462,21 +462,11 @@ enum SystemAction {
     Install {
         #[arg(required = true, help = "Package name(s) to install")]
         packages: Vec<String>,
-        #[arg(
-            long,
-            help = "Download and extract packages directly from registry (nix-like, bypasses host PM)"
-        )]
-        direct: bool,
     },
     #[command(about = "Declare and install packages (adds to desired state)")]
     Add {
         #[arg(required = true, help = "Package name(s) to add")]
         packages: Vec<String>,
-        #[arg(
-            long,
-            help = "Download and extract packages directly from registry (nix-like, bypasses host PM)"
-        )]
-        direct: bool,
     },
     #[command(about = "Remove packages and drop from desired state")]
     Remove {
@@ -587,23 +577,11 @@ fn init_logging(verbose: bool) -> Result<()> {
 }
 
 async fn handle_system_upgrade() -> Result<()> {
-    use crate::system_pm::SystemPm;
-    match SystemPm::detect().await {
-        Some(pm) => {
-            println!(
-                "\n{} upgrading OS packages via {}",
-                console::style("→").cyan(),
-                pm.name()
-            );
-            pm.upgrade_all().await
-        }
-        None => {
-            println!(
-                "  {} no supported system package manager found",
-                console::style("!").yellow()
-            );
-            Ok(())
-        }
+    match system::SystemManager::detect().await? {
+        Some(mgr) => mgr.upgrade_all().await,
+        None => Err(error::WaxError::PlatformNotSupported(
+            "No supported wax system registry found".to_string(),
+        )),
     }
 }
 
@@ -779,34 +757,18 @@ async fn main() -> Result<()> {
                 Some(mgr) => mgr.upgrade_all().await,
                 None => handle_system_upgrade().await,
             },
-            SystemAction::Install { packages, direct } => {
-                match system::SystemManager::detect().await? {
-                    Some(mgr) => {
-                        if direct {
-                            mgr.install_direct(&packages, false).await
-                        } else {
-                            mgr.install(&packages).await
-                        }
-                    }
-                    None => Err(crate::error::WaxError::PlatformNotSupported(
-                        "No supported system package manager found".to_string(),
-                    )),
-                }
-            }
-            SystemAction::Add { packages, direct } => {
-                match system::SystemManager::detect().await? {
-                    Some(mgr) => {
-                        if direct {
-                            mgr.install_direct(&packages, true).await
-                        } else {
-                            mgr.add(&packages).await
-                        }
-                    }
-                    None => Err(crate::error::WaxError::PlatformNotSupported(
-                        "No supported system package manager found".to_string(),
-                    )),
-                }
-            }
+            SystemAction::Install { packages } => match system::SystemManager::detect().await? {
+                Some(mgr) => mgr.install(&packages).await,
+                None => Err(crate::error::WaxError::PlatformNotSupported(
+                    "No supported wax system registry found".to_string(),
+                )),
+            },
+            SystemAction::Add { packages } => match system::SystemManager::detect().await? {
+                Some(mgr) => mgr.add(&packages).await,
+                None => Err(crate::error::WaxError::PlatformNotSupported(
+                    "No supported wax system registry found".to_string(),
+                )),
+            },
             SystemAction::Remove { packages } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.remove(&packages).await,
                 None => Err(crate::error::WaxError::PlatformNotSupported(
