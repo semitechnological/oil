@@ -6,7 +6,7 @@ use inquire::Confirm;
 use std::io::IsTerminal;
 use tracing::{info, instrument};
 
-const GITHUB_REPO_URL: &str = "https://github.com/plyght/wax";
+const GITHUB_REPO_URL: &str = "https://github.com/semitechnological/wax";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Channel {
@@ -95,7 +95,7 @@ pub async fn self_update(
 
 pub async fn available_stable_update() -> Result<Option<String>> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| WaxError::SelfUpdateError(format!("HTTP client error: {e}")))?;
 
@@ -282,6 +282,11 @@ mod tests {
     #[test]
     fn parse_version_without_prefix() {
         assert_eq!(parse_version("0.13.3"), Some((0, 13, 3)));
+    }
+
+    #[test]
+    fn nightly_update_uses_release_repository() {
+        assert_eq!(GITHUB_REPO_URL, "https://github.com/semitechnological/wax");
     }
 
     #[test]

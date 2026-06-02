@@ -1,12 +1,12 @@
 [package]
 name = "waxpkg"
-version = "0.17.2-system"
+version = "0.17.8"
 edition = "2021"
 authors = ["Wax Contributors"]
 description = "Fast Homebrew-compatible package manager"
 license = "MIT"
-repository = "https://github.com/plyght/wax"
-homepage = "https://github.com/plyght/wax"
+repository = "https://github.com/semitechnological/wax"
+homepage = "https://github.com/semitechnological/wax"
 documentation = "https://docs.rs/waxpkg"
 readme = "README.md"
 keywords = ["package-manager", "homebrew", "macos", "cli", "installer"]

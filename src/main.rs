@@ -43,6 +43,7 @@ fn should_refresh_state(command: &Commands) -> bool {
             | Commands::Uninstall { .. }
             | Commands::Reinstall { .. }
             | Commands::Postinstall { .. }
+            | Commands::SelfUpdate { .. }
             | Commands::Upgrade { .. }
             | Commands::System { .. }
             | Commands::Lock
@@ -69,6 +70,33 @@ async fn refresh_state_in_child_process() {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn();
+}
+
+async fn run_self_update(nightly: bool, force: bool, clean: bool, no_clean: bool) -> Result<()> {
+    if clean && no_clean {
+        return Err(error::WaxError::InvalidInput(
+            "Cannot specify both --clean and --no-clean".to_string(),
+        ));
+    }
+
+    let channel = if nightly {
+        commands::self_update::Channel::Nightly
+    } else {
+        commands::self_update::Channel::Stable
+    };
+    let nightly_cleanup = if nightly {
+        if clean {
+            Some(true)
+        } else if no_clean {
+            Some(false)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    commands::self_update::self_update(channel, force, nightly_cleanup).await
 }
 
 #[derive(Parser)]
@@ -112,6 +140,23 @@ enum Commands {
             long,
             help = "Force reinstall even if on latest version (with --self)"
         )]
+        force: bool,
+        #[arg(
+            long,
+            help = "After nightly self-update, clean Cargo git cache for wax"
+        )]
+        clean: bool,
+        #[arg(long, help = "After nightly self-update, keep Cargo git cache")]
+        no_clean: bool,
+    },
+
+    #[command(about = "Update wax itself  [alias: self-up]")]
+    #[command(name = "self-update")]
+    #[command(visible_alias = "self-up")]
+    SelfUpdate {
+        #[arg(short, long, help = "Use nightly build from GitHub")]
+        nightly: bool,
+        #[arg(short, long, help = "Force reinstall even if on latest version")]
         force: bool,
         #[arg(
             long,
@@ -237,8 +282,17 @@ enum Commands {
     Upgrade {
         #[arg(help = "Package name(s) to upgrade (upgrades all if omitted)")]
         packages: Vec<String>,
-        #[arg(long = "self", help = "Upgrade wax itself")]
+        #[arg(short = 's', long = "self", help = "Upgrade wax itself")]
         upgrade_self: bool,
+        #[arg(short, long, help = "Use nightly build from GitHub (with --self)")]
+        nightly: bool,
+        #[arg(
+            long,
+            help = "After nightly self-update, clean Cargo git cache for wax"
+        )]
+        clean: bool,
+        #[arg(long, help = "After nightly self-update, keep Cargo git cache")]
+        no_clean: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(
@@ -604,32 +658,17 @@ async fn main() -> Result<()> {
             }
 
             if update_self {
-                if clean && no_clean {
-                    return Err(error::WaxError::InvalidInput(
-                        "Cannot specify both --clean and --no-clean".to_string(),
-                    ));
-                }
-                let channel = if nightly {
-                    commands::self_update::Channel::Nightly
-                } else {
-                    commands::self_update::Channel::Stable
-                };
-                let nightly_cleanup = if channel == commands::self_update::Channel::Nightly {
-                    if clean {
-                        Some(true)
-                    } else if no_clean {
-                        Some(false)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                commands::self_update::self_update(channel, force, nightly_cleanup).await
+                run_self_update(nightly, force, clean, no_clean).await
             } else {
                 commands::update::update(&api_client, &cache).await
             }
         }
+        Commands::SelfUpdate {
+            nightly,
+            force,
+            clean,
+            no_clean,
+        } => run_self_update(nightly, force, clean, no_clean).await,
         Commands::Search { query } => commands::search::search(&cache, &query).await,
         Commands::Info { formula, cask } => {
             commands::info::info(&api_client, &cache, &formula, cask).await
@@ -696,16 +735,14 @@ async fn main() -> Result<()> {
         Commands::Upgrade {
             packages,
             upgrade_self,
+            nightly,
+            clean,
+            no_clean,
             dry_run,
             system,
         } => {
             if upgrade_self {
-                commands::self_update::self_update(
-                    commands::self_update::Channel::Stable,
-                    false,
-                    None,
-                )
-                .await?;
+                run_self_update(nightly, false, clean, no_clean).await?;
                 return Ok(());
             }
 

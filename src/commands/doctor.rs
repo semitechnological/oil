@@ -80,7 +80,7 @@ struct Check {
 async fn check_wax_update(fix: bool) -> DiagResult {
     let mut d = DiagResult::new(fix);
     match tokio::time::timeout(
-        Duration::from_secs(2),
+        Duration::from_secs(30),
         crate::commands::self_update::available_stable_update(),
     )
     .await
@@ -135,6 +135,7 @@ pub async fn doctor(cache: &Cache, fix: bool, full: bool) -> Result<()> {
     }
 
     let cache_for_check = cache.clone();
+    let cache_for_cask_metadata = cache.clone();
     let mut checks: Vec<Check> = vec![
         Check {
             title: "platform",
@@ -171,6 +172,10 @@ pub async fn doctor(cache: &Cache, fix: bool, full: bool) -> Result<()> {
         Check {
             title: "cask state",
             run: Box::pin(async move { check_cask_state(fix).await }),
+        },
+        Check {
+            title: "cask metadata",
+            run: Box::pin(async move { check_cask_metadata(&cache_for_cask_metadata, fix).await }),
         },
         Check {
             title: "state consistency",
@@ -361,6 +366,18 @@ fn check_platform(fix: bool) -> DiagResult {
     d
 }
 
+fn cellar_package_entry_name(entry: &std::fs::DirEntry) -> Option<String> {
+    let name = entry.file_name().to_string_lossy().to_string();
+    if name.starts_with('.') {
+        return None;
+    }
+
+    match entry.file_type() {
+        Ok(file_type) if file_type.is_dir() => Some(name),
+        _ => None,
+    }
+}
+
 fn check_prefix(fix: bool) -> DiagResult {
     let mut d = DiagResult::new(fix);
     let prefix = homebrew_prefix();
@@ -398,7 +415,12 @@ async fn check_cellar(fix: bool) -> DiagResult {
     if let Ok(cellar) = global_mode.cellar_path() {
         if cellar.exists() {
             let count = std::fs::read_dir(&cellar)
-                .map(|entries| entries.filter_map(|e| e.ok()).count())
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter_map(|entry| cellar_package_entry_name(&entry))
+                        .count()
+                })
                 .unwrap_or(0);
             d.pass(&format!(
                 "cellar: {} ({} packages)",
@@ -419,7 +441,12 @@ async fn check_cellar(fix: bool) -> DiagResult {
     if let Ok(cellar) = user_mode.cellar_path() {
         if cellar.exists() {
             let count = std::fs::read_dir(&cellar)
-                .map(|entries| entries.filter_map(|e| e.ok()).count())
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter_map(|entry| cellar_package_entry_name(&entry))
+                        .count()
+                })
                 .unwrap_or(0);
             d.pass(&format!(
                 "user cellar: {} ({} packages)",
@@ -604,6 +631,67 @@ async fn check_cask_state(fix: bool) -> DiagResult {
     d
 }
 
+async fn check_cask_metadata(cache: &Cache, fix: bool) -> DiagResult {
+    let mut d = DiagResult::new(fix);
+    let missing = match CaskState::caskroom_casks_missing_homebrew_metadata() {
+        Ok(missing) => missing,
+        Err(e) => {
+            d.fail(&format!("cask metadata scan failed: {}", e));
+            return d;
+        }
+    };
+
+    if missing.is_empty() {
+        d.pass("all Caskroom entries have Homebrew metadata");
+        return d;
+    }
+
+    if d.fix {
+        d.warn(&format!(
+            "{} Caskroom entries missing Homebrew metadata — repairing...",
+            missing.len()
+        ));
+        let cached_casks = cache.load_casks().await.unwrap_or_default();
+        match CaskState::new() {
+            Ok(state) => match state.repair_homebrew_metadata(&cached_casks).await {
+                Ok(repaired) => {
+                    let remaining =
+                        CaskState::caskroom_casks_missing_homebrew_metadata().unwrap_or_default();
+                    if remaining.is_empty() {
+                        d.fixed(&format!("repaired metadata for {} casks", repaired));
+                    } else {
+                        d.fail(&format!(
+                            "{} Caskroom entries still missing metadata",
+                            remaining.len()
+                        ));
+                    }
+                }
+                Err(e) => d.fail(&format!("cask metadata repair failed: {}", e)),
+            },
+            Err(e) => d.fail(&format!("cask state unavailable: {}", e)),
+        }
+    } else {
+        for name in missing.iter().take(5) {
+            d.fail(&format!(
+                "Caskroom metadata missing: {} (causes brew doctor warnings)",
+                style(name).magenta()
+            ));
+        }
+        if missing.len() > 5 {
+            d.fail(&format!(
+                "... and {} more casks missing metadata",
+                missing.len() - 5
+            ));
+        }
+        d.warn(&format!(
+            "run {} to write Homebrew-compatible cask metadata",
+            style("wax doctor --fix").yellow()
+        ));
+    }
+
+    d
+}
+
 async fn check_broken_symlinks(fix: bool) -> DiagResult {
     let mut d = DiagResult::new(fix);
     let prefix = homebrew_prefix();
@@ -711,7 +799,9 @@ async fn check_opt_symlinks(fix: bool) -> DiagResult {
         };
 
         for entry in entries.filter_map(|e| e.ok()) {
-            let name = entry.file_name().to_string_lossy().to_string();
+            let Some(name) = cellar_package_entry_name(&entry) else {
+                continue;
+            };
             let opt_link = opt_dir.join(&name);
 
             // Check if opt symlink exists and is valid
@@ -824,7 +914,9 @@ async fn check_state_consistency(fix: bool) -> DiagResult {
             }
             if let Ok(entries) = std::fs::read_dir(&cellar) {
                 for entry in entries.filter_map(|e| e.ok()) {
-                    let name = entry.file_name().to_string_lossy().to_string();
+                    let Some(name) = cellar_package_entry_name(&entry) else {
+                        continue;
+                    };
                     if !packages.contains_key(&name) {
                         orphaned_names.push((name, *mode));
                     }
@@ -1226,11 +1318,8 @@ fn check_unrelocated_bottles(fix: bool) -> DiagResult {
         let unrelocated: Vec<(String, String, std::path::PathBuf)> = entries
             .filter_map(|e| e.ok())
             .filter_map(|pkg_entry| {
+                let name = cellar_package_entry_name(&pkg_entry)?;
                 let pkg_dir = pkg_entry.path();
-                if !pkg_dir.is_dir() {
-                    return None;
-                }
-                let name = pkg_entry.file_name().to_string_lossy().to_string();
 
                 let mut versions: Vec<String> = match std::fs::read_dir(&pkg_dir) {
                     Ok(e) => e
@@ -1486,11 +1575,8 @@ fn check_invalid_signatures(fix: bool) -> DiagResult {
         let packages: Vec<(String, std::path::PathBuf, String)> = entries
             .filter_map(|e| e.ok())
             .filter_map(|pkg_entry| {
+                let name = cellar_package_entry_name(&pkg_entry)?;
                 let pkg_dir = pkg_entry.path();
-                if !pkg_dir.is_dir() {
-                    return None;
-                }
-                let name = pkg_entry.file_name().to_string_lossy().to_string();
 
                 let mut versions: Vec<String> = match std::fs::read_dir(&pkg_dir) {
                     Ok(e) => e
@@ -1648,5 +1734,26 @@ fn is_writable(path: &Path) -> bool {
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cellar_package_entry_name;
+
+    #[test]
+    fn cellar_package_entries_skip_hidden_files_and_non_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("example-formula")).unwrap();
+        std::fs::write(tmp.path().join(".keepme"), "").unwrap();
+        std::fs::write(tmp.path().join("README"), "").unwrap();
+
+        let mut names = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(|entry| cellar_package_entry_name(&entry.unwrap()))
+            .collect::<Vec<_>>();
+        names.sort();
+
+        assert_eq!(names, vec!["example-formula"]);
     }
 }

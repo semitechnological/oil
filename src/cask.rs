@@ -1,12 +1,16 @@
+use crate::api::{Cask, CaskDetails};
 use crate::bottle::{homebrew_prefix, BottleDownloader, DownloadTotals};
 use crate::error::{Result, WaxError};
 use crate::ui::dirs;
+use crate::version::sort_versions;
 use indicatif::ProgressBar;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
 use tracing::{debug, info, instrument};
@@ -22,6 +26,12 @@ pub struct InstalledCask {
     pub binary_paths: Option<Vec<String>>,
     #[serde(default)]
     pub app_name: Option<String>,
+}
+
+static CASK_STATE_WRITE_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+fn cask_state_write_lock() -> &'static tokio::sync::Mutex<()> {
+    CASK_STATE_WRITE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 pub struct CaskState {
@@ -62,6 +72,280 @@ fn normalize_existing_prefix(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
+fn path_modified_unix_seconds(path: &Path) -> i64 {
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn latest_version_dir(cask_path: &Path) -> Option<(String, i64)> {
+    let mut version_dates = HashMap::new();
+    let entries = std::fs::read_dir(cask_path).ok()?;
+
+    for entry in entries.filter_map(|entry| entry.ok()) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        version_dates.insert(name, path_modified_unix_seconds(&entry.path()));
+    }
+
+    let mut versions = version_dates.keys().cloned().collect::<Vec<_>>();
+    if versions.is_empty() {
+        return None;
+    }
+    sort_versions(&mut versions);
+    let version = versions.pop()?;
+    let install_date = version_dates.get(&version).copied().unwrap_or(0);
+    Some((version, install_date))
+}
+
+fn latest_metadata_version(cask_path: &Path) -> Option<(String, i64)> {
+    let metadata_dir = cask_path.join(".metadata");
+    let mut latest: Option<(String, String, i64)> = None;
+    let version_entries = std::fs::read_dir(metadata_dir).ok()?;
+
+    for version_entry in version_entries.filter_map(|entry| entry.ok()) {
+        let version = version_entry.file_name().to_string_lossy().to_string();
+        if version.starts_with('.') {
+            continue;
+        }
+        let Ok(version_type) = version_entry.file_type() else {
+            continue;
+        };
+        if !version_type.is_dir() {
+            continue;
+        }
+
+        let Ok(timestamp_entries) = std::fs::read_dir(version_entry.path()) else {
+            continue;
+        };
+        for timestamp_entry in timestamp_entries.filter_map(|entry| entry.ok()) {
+            let timestamp = timestamp_entry.file_name().to_string_lossy().to_string();
+            if timestamp.starts_with('.') {
+                continue;
+            }
+            let Ok(timestamp_type) = timestamp_entry.file_type() else {
+                continue;
+            };
+            if !timestamp_type.is_dir() {
+                continue;
+            }
+
+            let install_date = path_modified_unix_seconds(&timestamp_entry.path());
+            let replace = latest
+                .as_ref()
+                .map(|(_, latest_timestamp, _)| timestamp > *latest_timestamp)
+                .unwrap_or(true);
+            if replace {
+                latest = Some((version.clone(), timestamp, install_date));
+            }
+        }
+    }
+
+    latest.map(|(version, _, install_date)| (version, install_date))
+}
+
+fn latest_caskroom_version(cask_path: &Path) -> Option<(String, i64)> {
+    latest_metadata_version(cask_path).or_else(|| latest_version_dir(cask_path))
+}
+
+fn merge_caskroom_entry(
+    casks: &mut HashMap<String, InstalledCask>,
+    name: String,
+    version: String,
+    install_date: i64,
+) {
+    let existing = casks.get(&name).cloned();
+    casks.insert(
+        name.clone(),
+        InstalledCask {
+            name,
+            version,
+            install_date,
+            artifact_type: existing
+                .as_ref()
+                .and_then(|cask| cask.artifact_type.clone()),
+            binary_paths: existing.as_ref().and_then(|cask| cask.binary_paths.clone()),
+            app_name: existing.and_then(|cask| cask.app_name),
+        },
+    );
+}
+
+pub fn cask_path_has_homebrew_metadata(cask_path: &Path) -> bool {
+    let metadata_dir = cask_path.join(".metadata");
+    let Ok(version_entries) = std::fs::read_dir(metadata_dir) else {
+        return false;
+    };
+
+    for version_entry in version_entries.filter_map(|e| e.ok()) {
+        let Ok(version_type) = version_entry.file_type() else {
+            continue;
+        };
+        if !version_type.is_dir() {
+            continue;
+        }
+
+        let Ok(timestamp_entries) = std::fs::read_dir(version_entry.path()) else {
+            continue;
+        };
+        for timestamp_entry in timestamp_entries.filter_map(|e| e.ok()) {
+            let Ok(timestamp_type) = timestamp_entry.file_type() else {
+                continue;
+            };
+            if !timestamp_type.is_dir() {
+                continue;
+            }
+
+            let casks_dir = timestamp_entry.path().join("Casks");
+            let Ok(caskfiles) = std::fs::read_dir(casks_dir) else {
+                continue;
+            };
+            for caskfile in caskfiles.filter_map(|e| e.ok()) {
+                let path = caskfile.path();
+                if path.extension().and_then(|ext| ext.to_str()) == Some("rb")
+                    || path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn homebrew_metadata_timestamp(install_date: i64) -> String {
+    let seconds = install_date.max(0);
+    let days = seconds.div_euclid(86_400);
+    let seconds_of_day = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+
+    format!("{year:04}{month:02}{day:02}{hour:02}{minute:02}{second:02}.000")
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if month <= 2 { 1 } else { 0 };
+
+    (year as i32, month as u32, day as u32)
+}
+
+fn cask_source_path(token: &str) -> String {
+    let shard = token.chars().next().unwrap_or('x');
+    format!("Casks/{shard}/{token}.rb")
+}
+
+fn fallback_cask_display_name(token: &str) -> String {
+    token
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn cask_artifacts_from_installed(cask: &InstalledCask) -> Vec<serde_json::Value> {
+    let mut artifacts = Vec::new();
+
+    if let Some(app_name) = &cask.app_name {
+        artifacts.push(json!({ "app": [app_name] }));
+    }
+
+    if let Some(binary_paths) = &cask.binary_paths {
+        for binary_path in binary_paths {
+            let source = Path::new(binary_path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(binary_path);
+            artifacts.push(json!({ "binary": [source, { "target": binary_path }] }));
+        }
+    }
+
+    artifacts
+}
+
+fn cask_metadata_from_details(
+    cask: &InstalledCask,
+    details: &CaskDetails,
+) -> Result<serde_json::Value> {
+    let mut source = serde_json::to_value(details)?;
+    if let Some(obj) = source.as_object_mut() {
+        obj.entry("full_token")
+            .or_insert_with(|| serde_json::Value::String(cask.name.clone()));
+        obj.entry("tap")
+            .or_insert_with(|| serde_json::Value::String("homebrew/cask".to_string()));
+        obj.entry("ruby_source_path")
+            .or_insert_with(|| serde_json::Value::String(cask_source_path(&cask.name)));
+        obj.insert(
+            "version".to_string(),
+            serde_json::Value::String(cask.version.clone()),
+        );
+
+        if !obj.contains_key("artifacts") {
+            obj.insert(
+                "artifacts".to_string(),
+                serde_json::Value::Array(cask_artifacts_from_installed(cask)),
+            );
+        }
+    }
+    Ok(source)
+}
+
+fn cask_metadata_from_installed(cask: &InstalledCask, summary: Option<&Cask>) -> serde_json::Value {
+    let names = summary
+        .map(|c| c.name.clone())
+        .filter(|names| !names.is_empty())
+        .unwrap_or_else(|| vec![fallback_cask_display_name(&cask.name)]);
+    let desc = summary.and_then(|c| c.desc.clone());
+    let homepage = summary
+        .map(|c| c.homepage.clone())
+        .unwrap_or_else(|| format!("https://formulae.brew.sh/cask/{}", cask.name));
+    let full_token = summary
+        .map(|c| c.full_token.clone())
+        .unwrap_or_else(|| cask.name.clone());
+
+    json!({
+        "token": cask.name,
+        "full_token": full_token,
+        "name": names,
+        "desc": desc,
+        "homepage": homepage,
+        "version": cask.version,
+        "url": format!("https://formulae.brew.sh/cask/{}", cask.name),
+        "sha256": "no_check",
+        "artifacts": cask_artifacts_from_installed(cask),
+        "tap": "homebrew/cask",
+        "ruby_source_path": cask_source_path(&cask.name),
+    })
+}
+
 impl CaskState {
     pub fn new() -> Result<Self> {
         let legacy_state_path = dirs::wax_dir()?.join("installed_casks.json");
@@ -77,6 +361,33 @@ impl CaskState {
             .join(".local")
             .join("wax")
             .join("Caskroom"))
+    }
+
+    pub fn caskroom_casks_missing_homebrew_metadata() -> Result<Vec<String>> {
+        let caskroom = Self::caskroom_dir();
+        if !caskroom.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut missing = Vec::new();
+        for entry in std::fs::read_dir(caskroom)? {
+            let entry = entry?;
+            let file_type = entry.file_type()?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') {
+                continue;
+            }
+
+            if !cask_path_has_homebrew_metadata(&entry.path()) {
+                missing.push(name);
+            }
+        }
+        missing.sort();
+        Ok(missing)
     }
 
     pub async fn load(&self) -> Result<HashMap<String, InstalledCask>> {
@@ -99,30 +410,48 @@ impl CaskState {
 
     #[allow(dead_code)]
     async fn scan_cask_version_dir(&self, cask_path: &Path) -> Result<(String, i64)> {
-        let mut version = "unknown".to_string();
-        let mut install_date = 0;
+        Ok(latest_caskroom_version(cask_path).unwrap_or_else(|| ("unknown".to_string(), 0)))
+    }
 
-        let mut ver_entries = tokio::fs::read_dir(cask_path).await?;
-        while let Some(ver_entry) = ver_entries.next_entry().await? {
-            let ver_name = ver_entry.file_name().to_string_lossy().to_string();
-            if ver_name.starts_with('.') {
-                continue;
-            }
+    pub async fn sync_from_caskrooms(&self) -> Result<HashSet<String>> {
+        let mut casks = self.load().await?;
+        let mut synced_names = HashSet::new();
+        let mut roots = vec![Self::caskroom_dir()];
+        if let Ok(user_dir) = Self::user_caskroom_dir() {
+            roots.push(user_dir);
+        }
 
-            let t = ver_entry.file_type().await?;
-            if t.is_dir() {
-                version = ver_name;
-                if let Ok(metadata) = ver_entry.metadata().await {
-                    if let Ok(modified) = metadata.modified() {
-                        if let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) {
-                            install_date = duration.as_secs() as i64;
-                        }
-                    }
+        for root in roots {
+            let entries = match std::fs::read_dir(&root) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            for entry in entries.filter_map(|entry| entry.ok()) {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with('.') {
+                    continue;
                 }
-                break;
+                let Ok(file_type) = entry.file_type() else {
+                    continue;
+                };
+                if !file_type.is_dir() || file_type.is_symlink() {
+                    continue;
+                }
+
+                let Some((version, install_date)) = latest_caskroom_version(&entry.path()) else {
+                    continue;
+                };
+                if version == "unknown" {
+                    continue;
+                }
+                synced_names.insert(name.clone());
+                merge_caskroom_entry(&mut casks, name, version, install_date);
             }
         }
-        Ok((version, install_date))
+
+        self.save(&casks).await?;
+        Ok(synced_names)
     }
 
     pub async fn save(&self, casks: &HashMap<String, InstalledCask>) -> Result<()> {
@@ -143,7 +472,17 @@ impl CaskState {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn add(&self, cask: InstalledCask) -> Result<()> {
+        self.add_with_details(cask, None).await
+    }
+
+    pub async fn add_with_details(
+        &self,
+        cask: InstalledCask,
+        details: Option<&CaskDetails>,
+    ) -> Result<()> {
+        let _guard = cask_state_write_lock().lock().await;
         let mut casks = self.load().await?;
 
         // Also create Caskroom structure
@@ -169,12 +508,88 @@ impl CaskState {
             }
         }
 
+        let metadata = match details {
+            Some(details) => cask_metadata_from_details(&cask, details)?,
+            None => cask_metadata_from_installed(&cask, None),
+        };
+        self.write_homebrew_metadata_value(&cask, &metadata).await?;
+
         casks.insert(cask.name.clone(), cask);
         self.save(&casks).await?;
         Ok(())
     }
 
+    async fn write_homebrew_metadata_value(
+        &self,
+        cask: &InstalledCask,
+        source: &serde_json::Value,
+    ) -> Result<bool> {
+        let cask_dir = Self::caskroom_dir().join(&cask.name);
+        let timestamp = homebrew_metadata_timestamp(cask.install_date);
+        let metadata_dir = cask_dir
+            .join(".metadata")
+            .join(&cask.version)
+            .join(timestamp)
+            .join("Casks");
+        let metadata_file = metadata_dir.join(format!("{}.json", cask.name));
+        if metadata_file.exists() {
+            return Ok(false);
+        }
+
+        fs::create_dir_all(&metadata_dir).await?;
+
+        let json = serde_json::to_string_pretty(source)?;
+        fs::write(metadata_file, json).await?;
+        Ok(true)
+    }
+
+    pub async fn repair_homebrew_metadata(&self, cached_casks: &[Cask]) -> Result<usize> {
+        let missing = Self::caskroom_casks_missing_homebrew_metadata()?;
+        if missing.is_empty() {
+            return Ok(0);
+        }
+
+        let tracked = self.load().await.unwrap_or_default();
+        let cached_by_token = cached_casks
+            .iter()
+            .flat_map(|cask| {
+                [
+                    (cask.token.as_str(), cask),
+                    (cask.full_token.as_str(), cask),
+                ]
+            })
+            .collect::<HashMap<_, _>>();
+
+        let mut repaired = 0usize;
+        for name in missing {
+            let cask = match tracked.get(&name) {
+                Some(cask) => cask.clone(),
+                None => {
+                    let cask_dir = Self::caskroom_dir().join(&name);
+                    let (version, install_date) = self.scan_cask_version_dir(&cask_dir).await?;
+                    InstalledCask {
+                        name: name.clone(),
+                        version,
+                        install_date,
+                        artifact_type: None,
+                        binary_paths: None,
+                        app_name: None,
+                    }
+                }
+            };
+
+            let source =
+                cask_metadata_from_installed(&cask, cached_by_token.get(name.as_str()).copied());
+            if self.write_homebrew_metadata_value(&cask, &source).await? {
+                repaired += 1;
+            }
+        }
+
+        Ok(repaired)
+    }
+
     pub async fn remove(&self, name: &str) -> Result<()> {
+        let _guard = cask_state_write_lock().lock().await;
         let mut casks = self.load().await?;
 
         let caskroom = Self::caskroom_dir();
@@ -1013,18 +1428,15 @@ impl CaskInstaller {
                 )));
             }
 
-            // Warn before prompting so the user knows why credentials are needed.
-            if let Some(m) = crate::signal::clone_active_multi() {
-                let _ = m.println("\n⚠️  PKG installer requires administrator privileges");
-            } else {
-                println!("\n⚠️  PKG installer requires administrator privileges");
-            }
-
             // Acquire sudo credentials interactively before spawning the installer.
-            // acquire_sudo() prompts with Touch ID / password and caches the ticket.
-            tokio::task::spawn_blocking(crate::sudo::acquire_sudo)
-                .await
-                .map_err(|e| WaxError::InstallError(e.to_string()))??;
+            // Progress bars are suspended inside acquire_sudo_for so the password prompt is visible.
+            tokio::task::spawn_blocking(|| {
+                crate::sudo::acquire_sudo_for(Some(
+                    "PKG installer requires administrator privileges.",
+                ))
+            })
+            .await
+            .map_err(|e| WaxError::InstallError(e.to_string()))??;
 
             let install_output = tokio::process::Command::new("sudo")
                 .arg("installer")
@@ -1682,5 +2094,86 @@ mod tests {
             user_bin_dir,
             dirs::home_dir().unwrap().join(".local/wax/bin")
         );
+    }
+
+    #[test]
+    fn homebrew_metadata_timestamp_matches_homebrew_format() {
+        assert_eq!(homebrew_metadata_timestamp(0), "19700101000000.000");
+    }
+
+    #[test]
+    fn detects_homebrew_cask_metadata_file() {
+        let temp = tempdir().unwrap();
+        let cask_dir = temp.path().join("example-cask");
+        let metadata_dir = cask_dir
+            .join(".metadata")
+            .join("1.0.0")
+            .join("20260102030405.000")
+            .join("Casks");
+
+        assert!(!cask_path_has_homebrew_metadata(&cask_dir));
+
+        std::fs::create_dir_all(&metadata_dir).unwrap();
+        std::fs::write(metadata_dir.join("example-cask.json"), "{}").unwrap();
+
+        assert!(cask_path_has_homebrew_metadata(&cask_dir));
+    }
+
+    #[test]
+    fn fallback_cask_metadata_uses_homebrew_json_shape() {
+        let cask = InstalledCask {
+            name: "example-app".to_string(),
+            version: "1.2.3".to_string(),
+            install_date: 0,
+            artifact_type: Some("dmg".to_string()),
+            binary_paths: Some(vec!["/opt/homebrew/bin/example".to_string()]),
+            app_name: Some("Example.app".to_string()),
+        };
+
+        let source = cask_metadata_from_installed(&cask, None);
+
+        assert_eq!(source["token"], "example-app");
+        assert_eq!(source["version"], "1.2.3");
+        assert_eq!(source["sha256"], "no_check");
+        assert_eq!(source["tap"], "homebrew/cask");
+        assert_eq!(source["ruby_source_path"], "Casks/e/example-app.rb");
+        assert_eq!(source["artifacts"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn latest_caskroom_version_prefers_homebrew_metadata() {
+        let temp = tempdir().unwrap();
+        let cask_dir = temp.path().join("example-cask");
+        std::fs::create_dir_all(cask_dir.join("1.0.0")).unwrap();
+        std::fs::create_dir_all(cask_dir.join("2.0.0")).unwrap();
+        std::fs::create_dir_all(cask_dir.join(".metadata/3.0.0/20260101000000.000")).unwrap();
+
+        let (version, _) = latest_caskroom_version(&cask_dir).unwrap();
+
+        assert_eq!(version, "3.0.0");
+    }
+
+    #[test]
+    fn latest_caskroom_version_uses_latest_version_dir_without_metadata() {
+        let temp = tempdir().unwrap();
+        let cask_dir = temp.path().join("example-cask");
+        std::fs::create_dir_all(cask_dir.join("1.0.0")).unwrap();
+        std::fs::create_dir_all(cask_dir.join("2.0.0")).unwrap();
+
+        let (version, _) = latest_caskroom_version(&cask_dir).unwrap();
+
+        assert_eq!(version, "2.0.0");
+    }
+
+    #[test]
+    fn latest_caskroom_version_uses_metadata_without_version_dirs() {
+        let temp = tempdir().unwrap();
+        let cask_dir = temp.path().join("example-cask");
+        std::fs::create_dir_all(cask_dir.join(".metadata/1.0.0/20260101000000.000")).unwrap();
+        std::fs::create_dir_all(cask_dir.join(".metadata/2.0.0/20260201000000.000")).unwrap();
+
+        let (version, _) = latest_caskroom_version(&cask_dir).unwrap();
+
+        assert_eq!(version, "2.0.0");
     }
 }
