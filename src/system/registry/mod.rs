@@ -39,6 +39,9 @@ pub fn parse_dep_name(dep: &str) -> &str {
         .split('(')
         .next()
         .unwrap_or(dep)
+        .split(['=', '<', '>'])
+        .next()
+        .unwrap_or(dep)
         .trim()
 }
 
@@ -59,6 +62,16 @@ mod tests {
     #[test]
     fn test_parse_dep_name_with_arch() {
         assert_eq!(parse_dep_name("libgcc-s1:amd64"), "libgcc-s1:amd64");
+    }
+
+    #[test]
+    fn test_parse_dep_name_with_equals_constraint() {
+        assert_eq!(parse_dep_name("rg=14.1.1-r0"), "rg");
+    }
+
+    #[test]
+    fn test_parse_dep_name_with_comparison_constraint() {
+        assert_eq!(parse_dep_name("pcre2>=10.43"), "pcre2");
     }
 
     #[test]

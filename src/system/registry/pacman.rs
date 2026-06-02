@@ -235,3 +235,49 @@ fn parse_desc_fields(content: &str) -> HashMap<String, Vec<String>> {
 
     fields
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_desc_basic() {
+        let desc = r#"%NAME%
+ripgrep
+
+%VERSION%
+14.1.1-1
+
+%DESC%
+A search tool that combines grep and the silver searcher
+
+%FILENAME%
+ripgrep-14.1.1-1-x86_64.pkg.tar.zst
+
+%SHA256SUM%
+abc123
+
+%ISIZE%
+12345
+
+%DEPENDS%
+gcc-libs
+pcre2>=10.43
+
+%PROVIDES%
+rg=14.1.1
+
+"#;
+        let pkg = parse_desc(desc, "https://geo.mirror.pkgbuild.com", "extra", "x86_64").unwrap();
+
+        assert_eq!(pkg.name, "ripgrep");
+        assert_eq!(pkg.version, "14.1.1-1");
+        assert_eq!(pkg.sha256.as_deref(), Some("abc123"));
+        assert_eq!(pkg.depends, vec!["gcc-libs", "pcre2"]);
+        assert_eq!(pkg.provides, vec!["rg"]);
+        assert_eq!(
+            pkg.download_url,
+            "https://geo.mirror.pkgbuild.com/extra/os/x86_64/ripgrep-14.1.1-1-x86_64.pkg.tar.zst"
+        );
+    }
+}

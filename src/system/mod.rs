@@ -1,10 +1,8 @@
-/// Nix-inspired system package management for wax.
+/// Wax-managed system package support.
 ///
-/// Wax keeps its own declarative state and immutable generations while using
-/// the host package manager as the execution backend. This keeps the UX
-/// platform-neutral: the active backend may be Homebrew on macOS or a native
-/// OS package manager on Linux, but wax-owned state remains the source of
-/// truth for managed packages.
+/// Wax keeps its own declarative state, package manifests, and generations
+/// while resolving packages through native distribution registries. Installed
+/// files and wax-owned state remain the source of truth for managed packages.
 pub mod distro;
 pub mod extractor;
 pub mod generations;
@@ -14,6 +12,7 @@ pub mod manifest;
 pub mod query;
 pub mod registry;
 pub mod resolver;
+pub mod scripts;
 pub mod state;
 
 use crate::error::{Result, WaxError};
@@ -27,6 +26,7 @@ use crate::system::state::SystemState;
 use crate::system_pm::SystemPm;
 use console::style;
 use std::collections::{HashMap, HashSet};
+use std::process::Command;
 
 pub struct SystemManager {
     pm: SystemPm,
@@ -68,16 +68,16 @@ impl SystemManager {
 
     pub async fn upgrade_all(&self) -> Result<()> {
         Err(WaxError::PlatformNotSupported(
-            "wax direct system upgrade is not implemented yet".to_string(),
+            "wax system upgrade is not implemented yet".to_string(),
         ))
     }
 
-    pub async fn install(&self, packages: &[String]) -> Result<()> {
-        self.install_native(packages, false).await
+    pub async fn install_with_options(&self, packages: &[String], run_scripts: bool) -> Result<()> {
+        self.install_native(packages, false, run_scripts).await
     }
 
-    pub async fn add(&self, packages: &[String]) -> Result<()> {
-        self.install_native(packages, true).await
+    pub async fn add_with_options(&self, packages: &[String], run_scripts: bool) -> Result<()> {
+        self.install_native(packages, true, run_scripts).await
     }
 
     pub async fn remove(&self, packages: &[String]) -> Result<()> {
@@ -174,7 +174,7 @@ impl SystemManager {
             println!("  {} {}", style("+").green(), style(pkg).magenta());
         }
 
-        self.install_native(&to_install, true).await
+        self.install_native(&to_install, true, true).await
     }
 
     pub async fn list_generations(&self) -> Result<Vec<Generation>> {
@@ -232,7 +232,7 @@ impl SystemManager {
         if !to_install.is_empty() {
             let names: Vec<String> = to_install.iter().map(|p| p.name.clone()).collect();
             println!("  installing: {}", names.join(", "));
-            self.install_native(&names, false).await?;
+            self.install_native(&names, false, true).await?;
         }
 
         self.refresh_tracked_state(&mut state).await?;
@@ -255,14 +255,33 @@ impl SystemManager {
     }
 
     /// Install packages using Wax's native system package backend.
-    pub async fn install_native(&self, packages: &[String], declare: bool) -> Result<()> {
+    pub async fn install_native(
+        &self,
+        packages: &[String],
+        declare: bool,
+        run_scripts: bool,
+    ) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
 
+        self.warn_if_experimental_backend();
+
         let index = self.load_registry().await?;
         let resolver = Resolver::new(&index);
-        let resolved = resolver.resolve(packages)?;
+        let resolved =
+            resolver.resolve_with_satisfied(packages, |dep| self.host_dependency_satisfied(dep))?;
+        let requested_concrete: HashSet<String> = packages
+            .iter()
+            .filter_map(|pkg| index.find(crate::system::registry::parse_dep_name(pkg)))
+            .map(|pkg| pkg.name.clone())
+            .collect();
+        let resolved: Vec<&PackageMetadata> = resolved
+            .into_iter()
+            .filter(|pkg| {
+                requested_concrete.contains(&pkg.name) || !self.host_package_installed(&pkg.name)
+            })
+            .collect();
 
         if resolved.is_empty() {
             return Err(WaxError::InstallError(format!(
@@ -271,8 +290,10 @@ impl SystemManager {
             )));
         }
 
-        let names: Vec<String> = resolved.iter().map(|p| p.name.clone()).collect();
-        let dep_count = names.len().saturating_sub(packages.len());
+        let dep_count = resolved
+            .iter()
+            .filter(|pkg| !requested_concrete.contains(&pkg.name))
+            .count();
         if dep_count > 0 {
             println!(
                 "installing {} + {} {}",
@@ -297,7 +318,10 @@ impl SystemManager {
 
         let prefix = SystemInstaller::install_prefix();
         let metadata: Vec<PackageMetadata> = resolved.iter().map(|&p| p.clone()).collect();
-        let installed = self.installer.install_packages(&metadata, &prefix).await?;
+        let installed = self
+            .installer
+            .install_packages(&metadata, &prefix, run_scripts)
+            .await?;
 
         let mut state = SystemState::load().await?;
         if declare {
@@ -334,6 +358,64 @@ impl SystemManager {
         Ok(())
     }
 
+    fn warn_if_experimental_backend(&self) {
+        match self.pm {
+            SystemPm::Apt | SystemPm::Pacman | SystemPm::Apk => {
+                eprintln!(
+                    "{} {} system installs are experimental; Fedora/DNF is the currently smoke-tested Linux backend",
+                    style("warning:").yellow(),
+                    self.pm.name()
+                );
+            }
+            _ => {}
+        }
+    }
+
+    fn host_dependency_satisfied(&self, dependency: &str) -> bool {
+        let mut cmd = match self.pm {
+            SystemPm::Dnf | SystemPm::Yum => {
+                let mut cmd = Command::new("rpm");
+                cmd.args(["-q", "--whatprovides", dependency]);
+                cmd
+            }
+            _ => return self.host_package_installed(dependency),
+        };
+
+        cmd.output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    fn host_package_installed(&self, package: &str) -> bool {
+        let mut cmd = match self.pm {
+            SystemPm::Apt => {
+                let mut cmd = Command::new("dpkg-query");
+                cmd.args(["-W", "-f=${Status}", package]);
+                cmd
+            }
+            SystemPm::Dnf | SystemPm::Yum => {
+                let mut cmd = Command::new("rpm");
+                cmd.args(["-q", package]);
+                cmd
+            }
+            SystemPm::Pacman => {
+                let mut cmd = Command::new("pacman");
+                cmd.args(["-Q", package]);
+                cmd
+            }
+            SystemPm::Apk => {
+                let mut cmd = Command::new("apk");
+                cmd.args(["info", "-e", package]);
+                cmd
+            }
+            _ => return false,
+        };
+
+        cmd.output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
     async fn load_registry(&self) -> Result<PackageIndex> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
@@ -342,7 +424,7 @@ impl SystemManager {
 
         match self.pm {
             SystemPm::Apt => {
-                let reg = crate::system::registry::apt::AptRegistry::ubuntu_default();
+                let reg = crate::system::registry::apt::AptRegistry::default_for_host();
                 reg.load(&client).await
             }
             SystemPm::Dnf | SystemPm::Yum => {
@@ -358,7 +440,7 @@ impl SystemManager {
                 reg.load(&client).await
             }
             _ => Err(WaxError::PlatformNotSupported(
-                "direct install not supported for this package manager".into(),
+                "wax system registry install is not supported for this package manager".into(),
             )),
         }
     }

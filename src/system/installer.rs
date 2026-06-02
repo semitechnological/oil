@@ -3,6 +3,7 @@ use crate::error::{Result, WaxError};
 use crate::system::extractor::extract_package_tracked;
 use crate::system::manifest::FileManifest;
 use crate::system::registry::PackageMetadata;
+use crate::system::scripts::run_post_install_script;
 use crate::ui::{ProgressBarGuard, PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use sha2::Digest;
@@ -11,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::Semaphore;
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub struct SystemInstaller {
     downloader: Arc<BottleDownloader>,
@@ -31,6 +32,7 @@ impl SystemInstaller {
         &self,
         packages: &[PackageMetadata],
         prefix: &Path,
+        run_scripts: bool,
     ) -> Result<Vec<(String, String)>> {
         if packages.is_empty() {
             return Ok(vec![]);
@@ -58,7 +60,7 @@ impl SystemInstaller {
         let tmp_dir = TempDir::new()?;
         let mut tasks = Vec::new();
 
-        for (pkg, &size) in packages.iter().zip(sizes.iter()) {
+        for (index, (pkg, &size)) in packages.iter().zip(sizes.iter()).enumerate() {
             let max_conns = if total_size == 0 {
                 1
             } else {
@@ -127,13 +129,15 @@ impl SystemInstaller {
                     }
                 }
 
-                // Extract package and track files
+                // Extract package and track files.
                 let (files, dirs) = extract_package_tracked(&dest, &prefix_buf)?;
                 debug!("Extracted {} to {:?}", pkg_name, prefix_buf);
 
-                Ok::<(String, String, Vec<PathBuf>, Vec<PathBuf>), WaxError>((
+                Ok::<(usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>), WaxError>((
+                    index,
                     pkg_name,
                     pkg_version,
+                    dest,
                     files,
                     dirs,
                 ))
@@ -141,21 +145,58 @@ impl SystemInstaller {
         }
 
         let mut installed = Vec::new();
-        let mut manifest_data: Vec<(String, String, Vec<PathBuf>, Vec<PathBuf>)> = Vec::new();
+        let mut manifest_data: Vec<(usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>)> =
+            Vec::new();
 
+        let mut failures = Vec::new();
         for task in tasks {
             match task.await {
-                Ok(Ok((name, version, files, dirs))) => {
-                    manifest_data.push((name.clone(), version.clone(), files, dirs));
+                Ok(Ok((index, name, version, package_path, files, dirs))) => {
+                    manifest_data.push((
+                        index,
+                        name.clone(),
+                        version.clone(),
+                        package_path,
+                        files,
+                        dirs,
+                    ));
                     installed.push((name, version));
                 }
-                Ok(Err(e)) => warn!("Package install failed: {}", e),
-                Err(e) => warn!("Task join error: {}", e),
+                Ok(Err(e)) => failures.push(e.to_string()),
+                Err(e) => failures.push(format!("package task failed to join: {}", e)),
             }
         }
 
-        // Save manifests for each successfully installed package
-        for (name, version, files, dirs) in manifest_data {
+        if !failures.is_empty() {
+            return Err(WaxError::InstallError(format!(
+                "failed to install {} of {} packages:\n{}",
+                failures.len(),
+                packages.len(),
+                failures
+                    .into_iter()
+                    .map(|failure| format!("  - {failure}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )));
+        }
+
+        manifest_data.sort_by_key(|(index, _, _, _, _, _)| *index);
+
+        if run_scripts {
+            for (_, name, _, package_path, _, _) in &manifest_data {
+                run_post_install_script(package_path, prefix).map_err(|e| {
+                    WaxError::InstallError(format!(
+                        "post-install script for {} failed: {}",
+                        name, e
+                    ))
+                })?;
+            }
+        }
+
+        // Save manifests for each successfully installed package. A missing
+        // manifest would make wax think the install never happened, so surface
+        // this as an install failure rather than silently losing state.
+        for (_, name, version, _, files, dirs) in manifest_data {
             let manifest = FileManifest {
                 package: name,
                 version,
@@ -166,12 +207,20 @@ impl SystemInstaller {
                     .unwrap_or_default()
                     .as_secs() as i64,
             };
-            if let Err(e) = manifest.save().await {
-                warn!(
-                    "Failed to save file manifest for {}: {}",
+            manifest.save().await.map_err(|e| {
+                WaxError::InstallError(format!(
+                    "failed to save file manifest for {}: {}",
                     manifest.package, e
-                );
-            }
+                ))
+            })?;
+        }
+
+        if installed.len() != packages.len() {
+            return Err(WaxError::InstallError(format!(
+                "installed {} of {} resolved packages",
+                installed.len(),
+                packages.len()
+            )));
         }
 
         Ok(installed)

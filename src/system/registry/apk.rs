@@ -31,7 +31,8 @@ impl ApkRegistry {
     }
 
     pub fn alpine_default() -> Self {
-        Self::new("http://dl-cdn.alpinelinux.org/alpine", "v3.19")
+        let branch = alpine_branch_from_os_release().unwrap_or_else(|| "v3.20".to_string());
+        Self::new("http://dl-cdn.alpinelinux.org/alpine", &branch)
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
@@ -137,6 +138,22 @@ impl ApkRegistry {
     }
 }
 
+fn alpine_branch_from_os_release() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    branch_from_os_release(&os_release)
+}
+
+fn branch_from_os_release(os_release: &str) -> Option<String> {
+    let version = os_release.lines().find_map(|line| {
+        let value = line.strip_prefix("VERSION_ID=")?;
+        Some(value.trim_matches('"'))
+    })?;
+    let mut parts = version.split('.');
+    let major = parts.next()?;
+    let minor = parts.next()?;
+    Some(format!("v{major}.{minor}"))
+}
+
 fn parse_apkindex(
     content: &str,
     mirror: &str,
@@ -213,4 +230,38 @@ fn parse_apkindex(
     }
 
     packages
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_branch_from_os_release_uses_major_minor() {
+        let os_release = "ID=alpine\nVERSION_ID=3.20.3\n";
+        assert_eq!(branch_from_os_release(os_release).as_deref(), Some("v3.20"));
+    }
+
+    #[test]
+    fn test_parse_apkindex_basic() {
+        let content = "P:ripgrep\nV:14.1.1-r0\nT:Search tool\nI:12345\nD:so:libc.musl-x86_64.so.1 pcre2\np:rg=14.1.1-r0\n\n";
+        let packages = parse_apkindex(
+            content,
+            "https://dl-cdn.alpinelinux.org/alpine",
+            "v3.20",
+            "community",
+            "x86_64",
+        );
+
+        assert_eq!(packages.len(), 1);
+        let pkg = &packages[0];
+        assert_eq!(pkg.name, "ripgrep");
+        assert_eq!(pkg.version, "14.1.1-r0");
+        assert_eq!(pkg.depends, vec!["so:libc.musl-x86_64.so.1", "pcre2"]);
+        assert_eq!(pkg.provides, vec!["rg"]);
+        assert_eq!(
+            pkg.download_url,
+            "https://dl-cdn.alpinelinux.org/alpine/v3.20/community/x86_64/ripgrep-14.1.1-r0.apk"
+        );
+    }
 }

@@ -1,4 +1,4 @@
-/// Nix-inspired atomic generation management for system packages.
+/// Atomic generation management for wax-managed system packages.
 ///
 /// Every mutating system operation (install, remove, upgrade) captures a
 /// point-in-time snapshot of the installed package set into an immutable

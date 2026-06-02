@@ -8,14 +8,34 @@
 /// TODO: implement pure-Rust RPM header + cpio parsing as ultimate fallback.
 /// The `rpm-rs` crate exists but is not yet mature enough for production use.
 use crate::error::{Result, WaxError};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Extract an RPM and return (files, dirs). RPM tracked removal is not yet
-/// supported, so empty vecs are returned.
+/// Extract an RPM and return newly-created files/symlinks and directories.
 pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
+    if dest_dir == Path::new("/") {
+        extract(path, dest_dir)?;
+        return Ok((vec![], vec![]));
+    }
+
+    let before = snapshot_tree(dest_dir)?;
     extract(path, dest_dir)?;
-    Ok((vec![], vec![]))
+    let after = snapshot_tree(dest_dir)?;
+
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    for path in after.difference(&before) {
+        let metadata = path.symlink_metadata()?;
+        if metadata.is_dir() {
+            dirs.push(path.clone());
+        } else {
+            files.push(path.clone());
+        }
+    }
+    files.sort();
+    dirs.sort();
+    Ok((files, dirs))
 }
 
 pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
@@ -44,6 +64,28 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
          Package: {}",
         path.display()
     )))
+}
+
+fn snapshot_tree(root: &Path) -> Result<HashSet<PathBuf>> {
+    let mut paths = HashSet::new();
+    if !root.exists() {
+        return Ok(paths);
+    }
+
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let metadata = path.symlink_metadata()?;
+            paths.insert(path.clone());
+            if metadata.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+
+    Ok(paths)
 }
 
 fn which_cmd(cmd: &str) -> bool {
@@ -103,41 +145,41 @@ fn extract_with_bsdtar(path: &Path, dest_dir: &Path) -> Result<()> {
 }
 
 fn extract_with_rpm2archive(path: &Path, dest_dir: &Path) -> Result<()> {
-    // rpm2archive writes <pkg>.tgz in the same directory as the input
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    let stem = path.file_stem().unwrap_or_default();
-    let tgz_path = parent.join(format!("{}.tgz", stem.to_string_lossy()));
-
-    let output = Command::new("rpm2archive")
+    // Fedora's rpm2archive writes the compressed archive to stdout, so stream it
+    // directly into tar instead of expecting a sidecar archive file.
+    let mut rpm2archive = Command::new("rpm2archive")
         .arg(path)
-        .output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to run rpm2archive: {}", e)))?;
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| WaxError::InstallError(format!("Failed to spawn rpm2archive: {}", e)))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let archive_stdout = rpm2archive
+        .stdout
+        .take()
+        .ok_or_else(|| WaxError::InstallError("rpm2archive stdout not available".to_string()))?;
+
+    let tar_output = Command::new("tar")
+        .args(["-xzf", "-"])
+        .current_dir(dest_dir)
+        .stdin(archive_stdout)
+        .output()
+        .map_err(|e| WaxError::InstallError(format!("Failed to run tar: {}", e)))?;
+
+    let rpm2archive_output = rpm2archive
+        .wait_with_output()
+        .map_err(|e| WaxError::InstallError(format!("Failed to wait for rpm2archive: {}", e)))?;
+
+    if !rpm2archive_output.status.success() {
+        let stderr = String::from_utf8_lossy(&rpm2archive_output.stderr);
         return Err(WaxError::InstallError(format!(
             "rpm2archive failed: {}",
             stderr.trim()
         )));
     }
 
-    if !tgz_path.exists() {
-        return Err(WaxError::InstallError(
-            "rpm2archive did not produce expected .tgz file".to_string(),
-        ));
-    }
-
-    let output = Command::new("tar")
-        .args(["-xzf", &tgz_path.to_string_lossy()])
-        .current_dir(dest_dir)
-        .output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to run tar: {}", e)))?;
-
-    // Clean up the temporary tgz
-    let _ = std::fs::remove_file(&tgz_path);
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    if !tar_output.status.success() {
+        let stderr = String::from_utf8_lossy(&tar_output.stderr);
         return Err(WaxError::InstallError(format!(
             "tar failed: {}",
             stderr.trim()

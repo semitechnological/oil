@@ -31,13 +31,22 @@ impl AptRegistry {
         }
     }
 
+    pub fn default_for_host() -> Self {
+        match apt_family_from_os_release().as_deref() {
+            Some("debian") => Self::debian_default(),
+            _ => Self::ubuntu_default(),
+        }
+    }
+
     pub fn ubuntu_default() -> Self {
-        Self::new("http://archive.ubuntu.com/ubuntu", "jammy")
+        let suite = debian_suite_from_os_release().unwrap_or_else(|| "noble".to_string());
+        Self::new("http://archive.ubuntu.com/ubuntu", &suite)
     }
 
     #[allow(dead_code)]
     pub fn debian_default() -> Self {
-        Self::new("http://deb.debian.org/debian", "bookworm")
+        let suite = debian_suite_from_os_release().unwrap_or_else(|| "bookworm".to_string());
+        Self::new("http://deb.debian.org/debian", &suite)
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
@@ -169,6 +178,59 @@ impl AptRegistry {
             packages: all_packages,
         })
     }
+}
+
+fn debian_suite_from_os_release() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    suite_from_os_release(&os_release)
+}
+
+fn apt_family_from_os_release() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    family_from_os_release(&os_release)
+}
+
+fn family_from_os_release(os_release: &str) -> Option<String> {
+    let mut id = None;
+    let mut id_like = Vec::new();
+
+    for line in os_release.lines() {
+        if let Some(value) = line.strip_prefix("ID=") {
+            id = Some(value.trim_matches('"').to_string());
+        } else if let Some(value) = line.strip_prefix("ID_LIKE=") {
+            id_like = value
+                .trim_matches('"')
+                .split_whitespace()
+                .map(ToString::to_string)
+                .collect();
+        }
+    }
+
+    if id.as_deref() == Some("debian") {
+        return Some("debian".to_string());
+    }
+    if id.as_deref() == Some("ubuntu") || id_like.iter().any(|value| value == "ubuntu") {
+        return Some("ubuntu".to_string());
+    }
+    if id_like.iter().any(|value| value == "debian") {
+        return Some("debian".to_string());
+    }
+    id
+}
+
+fn suite_from_os_release(os_release: &str) -> Option<String> {
+    let mut version_codename = None;
+    let mut ubuntu_codename = None;
+
+    for line in os_release.lines() {
+        if let Some(value) = line.strip_prefix("VERSION_CODENAME=") {
+            version_codename = Some(value.trim_matches('"').to_string());
+        } else if let Some(value) = line.strip_prefix("UBUNTU_CODENAME=") {
+            ubuntu_codename = Some(value.trim_matches('"').to_string());
+        }
+    }
+
+    version_codename.or(ubuntu_codename)
 }
 
 /// Attempt GPG signature verification of InRelease content.
@@ -357,6 +419,36 @@ pub(crate) fn parse_packages_file(content: &str, mirror: &str) -> Vec<PackageMet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_family_from_os_release_detects_debian() {
+        let os_release = "ID=debian\nVERSION_CODENAME=bookworm\n";
+        assert_eq!(
+            family_from_os_release(os_release).as_deref(),
+            Some("debian")
+        );
+    }
+
+    #[test]
+    fn test_family_from_os_release_detects_ubuntu_derivative() {
+        let os_release = "ID=linuxmint\nID_LIKE=\"ubuntu debian\"\nUBUNTU_CODENAME=jammy\n";
+        assert_eq!(
+            family_from_os_release(os_release).as_deref(),
+            Some("ubuntu")
+        );
+    }
+
+    #[test]
+    fn test_suite_from_os_release_prefers_version_codename() {
+        let os_release = "ID=ubuntu\nVERSION_CODENAME=noble\nUBUNTU_CODENAME=jammy\n";
+        assert_eq!(suite_from_os_release(os_release).as_deref(), Some("noble"));
+    }
+
+    #[test]
+    fn test_suite_from_os_release_uses_ubuntu_codename() {
+        let os_release = "ID=linuxmint\nUBUNTU_CODENAME=jammy\n";
+        assert_eq!(suite_from_os_release(os_release).as_deref(), Some("jammy"));
+    }
 
     #[test]
     fn test_parse_packages_file_basic() {

@@ -20,7 +20,11 @@ impl DnfRegistry {
     }
 
     pub fn fedora_default() -> Self {
-        Self::new("https://dl.fedoraproject.org/pub/fedora/linux/releases/39/Everything/x86_64/os/")
+        let version = fedora_version_id().unwrap_or_else(|| "43".to_string());
+        let arch = rpm_arch().unwrap_or_else(|| "x86_64".to_string());
+        Self::new(&format!(
+            "https://dl.fedoraproject.org/pub/fedora/linux/releases/{version}/Everything/{arch}/os/"
+        ))
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
@@ -145,6 +149,31 @@ impl DnfRegistry {
     }
 }
 
+fn fedora_version_id() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    os_release.lines().find_map(|line| {
+        let value = line.strip_prefix("VERSION_ID=")?;
+        Some(value.trim_matches('"').to_string())
+    })
+}
+
+fn rpm_arch() -> Option<String> {
+    let output = std::process::Command::new("uname")
+        .arg("-m")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let arch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match arch.as_str() {
+        "amd64" => Some("x86_64".to_string()),
+        "arm64" => Some("aarch64".to_string()),
+        _ if !arch.is_empty() => Some(arch),
+        _ => None,
+    }
+}
+
 /// Helper to get local name of a quick-xml attribute key as an owned String.
 fn attr_local_name(attr: &quick_xml::events::attributes::Attribute) -> String {
     let local = attr.key.local_name();
@@ -225,7 +254,9 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
     let mut sha256: Option<String> = None;
     let mut installed_size: u64 = 0;
     let mut depends: Vec<String> = Vec::new();
+    let mut provides: Vec<String> = Vec::new();
     let mut in_requires = false;
+    let mut in_provides = false;
     let mut checksum_is_sha256 = false;
 
     loop {
@@ -257,6 +288,7 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
                             sha256 = None;
                             installed_size = 0;
                             depends = Vec::new();
+                            provides = Vec::new();
                         }
                     }
                     "version" if in_package => {
@@ -309,15 +341,25 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
                         }
                     }
                     "requires" => in_requires = true,
+                    "provides" => in_provides = true,
                     "entry" if in_package && in_requires => {
                         for attr in e.attributes().flatten() {
                             let key = attr_local_name(&attr);
                             let val = attr.unescape_value().unwrap_or_default();
                             if key == "name" {
-                                let dname = val.trim_start_matches('/');
-                                if !dname.starts_with("rpmlib(") {
+                                let dname = val.as_ref();
+                                if !dname.starts_with("rpmlib(") && !dname.is_empty() {
                                     depends.push(dname.to_string());
                                 }
+                            }
+                        }
+                    }
+                    "entry" if in_package && in_provides => {
+                        for attr in e.attributes().flatten() {
+                            let key = attr_local_name(&attr);
+                            let val = attr.unescape_value().unwrap_or_default();
+                            if key == "name" && !val.is_empty() {
+                                provides.push(val.to_string());
                             }
                         }
                     }
@@ -365,7 +407,7 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
                                 sha256: sha256.clone(),
                                 installed_size,
                                 depends: depends.clone(),
-                                provides: Vec::new(),
+                                provides: provides.clone(),
                             });
                         }
                         in_package = false;
@@ -373,6 +415,7 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
                         checksum_is_sha256 = false;
                     }
                     "requires" => in_requires = false,
+                    "provides" => in_provides = false,
                     _ => {
                         current_tag = String::new();
                     }
@@ -389,4 +432,51 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
     }
 
     Ok(packages)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_primary_xml_captures_requires_and_provides() {
+        let xml = r#"
+            <metadata xmlns="http://linux.duke.edu/metadata/common"
+                      xmlns:rpm="http://linux.duke.edu/metadata/rpm">
+              <package type="rpm">
+                <name>ripgrep</name>
+                <arch>x86_64</arch>
+                <version epoch="0" ver="14.1.1" rel="7.fc43"/>
+                <checksum type="sha256">abc123</checksum>
+                <summary>Line-oriented search tool</summary>
+                <size installed="12345"/>
+                <location href="Packages/r/ripgrep-14.1.1-7.fc43.x86_64.rpm"/>
+                <format>
+                  <rpm:requires>
+                    <rpm:entry name="libc.so.6()(64bit)"/>
+                    <rpm:entry name="rpmlib(CompressedFileNames)"/>
+                  </rpm:requires>
+                  <rpm:provides>
+                    <rpm:entry name="rg"/>
+                    <rpm:entry name="ripgrep"/>
+                  </rpm:provides>
+                </format>
+              </package>
+            </metadata>
+        "#;
+
+        let packages = parse_primary_xml(xml, "https://example.test/repo").unwrap();
+
+        assert_eq!(packages.len(), 1);
+        let pkg = &packages[0];
+        assert_eq!(pkg.name, "ripgrep");
+        assert_eq!(pkg.version, "14.1.1-7.fc43");
+        assert_eq!(
+            pkg.download_url,
+            "https://example.test/repo/Packages/r/ripgrep-14.1.1-7.fc43.x86_64.rpm"
+        );
+        assert_eq!(pkg.sha256.as_deref(), Some("abc123"));
+        assert_eq!(pkg.depends, vec!["libc.so.6()(64bit)"]);
+        assert_eq!(pkg.provides, vec!["rg", "ripgrep"]);
+    }
 }
