@@ -328,28 +328,22 @@ fn parse_primary_xml(xml: &str, baseurl: &str) -> Result<Vec<PackageMetadata>> {
                     }
                 }
             }
-            Ok(Event::Text(ref e)) => {
-                if in_package {
-                    let text = e
-                        .decode()
-                        .ok()
-                        .and_then(|text| unescape(&text).ok().map(|text| text.into_owned()))
-                        .unwrap_or_default();
-                    match current_tag.as_str() {
-                        "name" => name = text,
-                        "summary" => {
-                            if description.is_empty() {
-                                description = text;
-                            }
-                        }
-                        "description" => {
-                            if description.is_empty() {
-                                description = text.lines().next().unwrap_or("").to_string();
-                            }
-                        }
-                        "checksum" if checksum_is_sha256 => sha256 = Some(text),
-                        _ => {}
+            Ok(Event::Text(ref e)) if in_package => {
+                let text = e
+                    .decode()
+                    .ok()
+                    .and_then(|text| unescape(&text).ok().map(|text| text.into_owned()))
+                    .unwrap_or_default();
+                match current_tag.as_str() {
+                    "name" => name = text,
+                    "summary" if description.is_empty() => {
+                        description = text;
                     }
+                    "description" if description.is_empty() => {
+                        description = text.lines().next().unwrap_or("").to_string();
+                    }
+                    "checksum" if checksum_is_sha256 => sha256 = Some(text),
+                    _ => {}
                 }
             }
             Ok(Event::End(ref e)) => {

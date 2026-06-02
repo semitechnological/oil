@@ -1017,9 +1017,9 @@ fn check_glibc_version(fix: bool) -> DiagResult {
 }
 
 fn check_metal_toolchain(fix: bool) -> DiagResult {
-    let mut d = DiagResult::new(fix);
     #[cfg(target_os = "macos")]
     {
+        let mut d = DiagResult::new(fix);
         if let Some(output) =
             run_command_with_timeout("system_profiler", &["SPDisplaysDataType"], 2)
         {
@@ -1035,8 +1035,13 @@ fn check_metal_toolchain(fix: bool) -> DiagResult {
                 d.warn("Metal GPU support not detected");
             }
         }
+        d
     }
-    d
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        DiagResult::new(fix)
+    }
 }
 
 fn check_linux_gpu_toolchain(fix: bool) -> DiagResult {

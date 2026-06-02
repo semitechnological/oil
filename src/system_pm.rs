@@ -9,6 +9,7 @@ use crate::error::{Result, WaxError};
 use crate::formula_parser::FormulaParser;
 use console::style;
 use sha2::{Digest, Sha256};
+use std::path::Path;
 use tokio::process::Command;
 use tracing::{debug, warn};
 
@@ -472,14 +473,35 @@ impl SystemPm {
 
 /// Check if a binary exists on PATH.
 async fn which(bin: &str) -> bool {
-    Command::new("which")
-        .arg(bin)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false)
+    if bin.contains(std::path::MAIN_SEPARATOR) {
+        return is_executable(Path::new(bin));
+    }
+
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+
+    std::env::split_paths(&paths).any(|dir| is_executable(&dir.join(bin)))
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 /// Run a command, inheriting stdin/stdout/stderr so the user sees all output

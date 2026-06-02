@@ -15,9 +15,8 @@ use crate::install::{InstallMode, InstalledPackage};
 #[cfg(target_os = "macos")]
 use crate::ui::dirs;
 use std::collections::HashMap;
-use std::path::Path;
 #[cfg(target_os = "macos")]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 #[cfg(target_os = "macos")]
@@ -265,7 +264,7 @@ fn macos_application_roots() -> Vec<PathBuf> {
     roots
 }
 
-#[allow(dead_code)]
+#[cfg(target_os = "macos")]
 async fn read_app_bundle_name(path: &Path) -> Option<String> {
     if let Some(name) = read_info_plist_string(path, "CFBundleDisplayName").await {
         return Some(name);
@@ -279,6 +278,7 @@ async fn read_app_bundle_name(path: &Path) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+#[cfg(target_os = "macos")]
 pub async fn read_app_bundle_version(path: &Path) -> Option<String> {
     if let Some(version) = read_info_plist_string(path, "CFBundleShortVersionString").await {
         Some(version)
@@ -287,6 +287,7 @@ pub async fn read_app_bundle_version(path: &Path) -> Option<String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 async fn read_app_bundle_version_for_cask(path: &Path, cask: Option<&Cask>) -> Option<String> {
     if cask.is_none() {
         return read_app_bundle_version(path).await;
@@ -304,6 +305,7 @@ async fn read_app_bundle_version_for_cask(path: &Path, cask: Option<&Cask>) -> O
     short_version.or(bundle_version)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn combine_bundle_version_for_cask(
     short_version: &str,
     bundle_version: &str,
@@ -321,42 +323,33 @@ fn combine_bundle_version_for_cask(
     }
 }
 
+#[cfg(target_os = "macos")]
 async fn read_info_plist_string(path: &Path, key: &str) -> Option<String> {
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        let _ = key;
+    let plist = path.join("Contents/Info.plist");
+    if !plist.exists() {
         return None;
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        let plist = path.join("Contents/Info.plist");
-        if !plist.exists() {
-            return None;
-        }
+    let output = Command::new("plutil")
+        .arg("-extract")
+        .arg(key)
+        .arg("raw")
+        .arg("-o")
+        .arg("-")
+        .arg(&plist)
+        .output()
+        .await
+        .ok()?;
 
-        let output = Command::new("plutil")
-            .arg("-extract")
-            .arg(key)
-            .arg("raw")
-            .arg("-o")
-            .arg("-")
-            .arg(&plist)
-            .output()
-            .await
-            .ok()?;
+    if !output.status.success() {
+        return None;
+    }
 
-        if !output.status.success() {
-            return None;
-        }
-
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if value.is_empty() {
-            None
-        } else {
-            Some(value)
-        }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
