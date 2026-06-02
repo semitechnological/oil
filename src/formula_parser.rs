@@ -407,6 +407,10 @@ impl FormulaParser {
     /// - `on_intel do` / `on_arm do` named blocks (newer cask style)
     /// - `on_linux do` blocks with `if Hardware::CPU.intel?` / `if Hardware::CPU.arm?`
     /// - `on_linux do` blocks with a single URL (no CPU branching)
+    #[allow(
+        dead_code,
+        reason = "Linux cask handoff is disabled; keep parser for future wax-managed cask support"
+    )]
     pub fn parse_cask_linux_artifact(content: &str) -> Option<CaskLinuxArtifact> {
         let is_arm = std::env::consts::ARCH == "aarch64";
 

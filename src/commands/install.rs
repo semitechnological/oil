@@ -716,7 +716,7 @@ async fn install_impl(
         }
 
         return match crate::system::SystemManager::detect().await? {
-            Some(mgr) => mgr.install(package_names).await,
+            Some(mgr) => mgr.install_with_options(package_names, run_scripts).await,
             None => Err(WaxError::PlatformNotSupported(
                 "No supported wax system registry found".to_string(),
             )),

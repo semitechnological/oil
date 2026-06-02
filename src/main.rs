@@ -295,14 +295,11 @@ enum Commands {
         no_clean: bool,
         #[arg(long)]
         dry_run: bool,
-        #[arg(
-            long,
-            help = "Also upgrade OS packages via the native package manager (apt/dnf/pacman/apk/…)"
-        )]
+        #[arg(long, help = "Also upgrade Wax-managed system packages")]
         system: bool,
     },
 
-    #[command(about = "Manage OS-level packages via the native package manager")]
+    #[command(about = "Manage Wax-owned OS-level packages")]
     System {
         #[command(subcommand)]
         action: SystemAction,
@@ -449,24 +446,28 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum SystemAction {
-    #[command(about = "Search OS packages via the native package manager")]
+    #[command(about = "Search Wax system package registries")]
     Search {
         #[arg(help = "Package search query")]
         query: String,
         #[arg(long, default_value_t = 20, help = "Maximum number of results")]
         limit: usize,
     },
-    #[command(about = "Upgrade all OS packages via the native package manager")]
+    #[command(about = "Upgrade Wax-managed system packages")]
     Upgrade,
-    #[command(about = "Install packages via the native package manager")]
+    #[command(about = "Install Wax-managed system packages")]
     Install {
         #[arg(required = true, help = "Package name(s) to install")]
         packages: Vec<String>,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
     #[command(about = "Declare and install packages (adds to desired state)")]
     Add {
         #[arg(required = true, help = "Package name(s) to add")]
         packages: Vec<String>,
+        #[arg(long = "no-script", help = "Skip automatic post-install scripts")]
+        no_script: bool,
     },
     #[command(about = "Remove packages and drop from desired state")]
     Remove {
@@ -757,14 +758,20 @@ async fn main() -> Result<()> {
                 Some(mgr) => mgr.upgrade_all().await,
                 None => handle_system_upgrade().await,
             },
-            SystemAction::Install { packages } => match system::SystemManager::detect().await? {
-                Some(mgr) => mgr.install(&packages).await,
+            SystemAction::Install {
+                packages,
+                no_script,
+            } => match system::SystemManager::detect().await? {
+                Some(mgr) => mgr.install_with_options(&packages, !no_script).await,
                 None => Err(crate::error::WaxError::PlatformNotSupported(
                     "No supported wax system registry found".to_string(),
                 )),
             },
-            SystemAction::Add { packages } => match system::SystemManager::detect().await? {
-                Some(mgr) => mgr.add(&packages).await,
+            SystemAction::Add {
+                packages,
+                no_script,
+            } => match system::SystemManager::detect().await? {
+                Some(mgr) => mgr.add_with_options(&packages, !no_script).await,
                 None => Err(crate::error::WaxError::PlatformNotSupported(
                     "No supported wax system registry found".to_string(),
                 )),
