@@ -32,7 +32,7 @@ Wax reimagines package management by replacing Homebrew's git-based tap system w
 **One-liner (recommended)** — downloads the pre-built binary for your platform:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/semitechnological/wax/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tschk/wax/master/install.sh | bash
 ```
 
 Installs to `~/.local/bin/wax`. Override the destination with `WAX_INSTALL_DIR=/usr/local/bin`.
@@ -40,7 +40,7 @@ Installs to `~/.local/bin/wax`. Override the destination with `WAX_INSTALL_DIR=/
 **From a git clone** (builds with your Rust toolchain; no GitHub download):
 
 ```bash
-git clone https://github.com/semitechnological/wax.git
+git clone https://github.com/tschk/wax.git
 cd wax
 ./install.sh
 ```
@@ -50,14 +50,9 @@ To **force** a pre-built release while standing in a clone, set `WAX_USE_RELEASE
 GitHub Releases ship **Linux** and **macOS** binaries (`wax-linux-*`, `wax-macos-*`) with `.sha256` sidecars when published by CI.
 The installer requires checksum verification by default. Set `WAX_NO_VERIFY=1` only when you explicitly accept installing without a `.sha256` sidecar.
 
-**Homebrew tap** — builds from source via cargo:
+**will fix homebrew tap sometime**
 
-```bash
-brew tap semitechnological/tap
-brew install --HEAD wax
-```
-
-**Cargo:**
+**Cargo (older version):**
 
 ```bash
 cargo install waxpkg
@@ -66,7 +61,7 @@ cargo install waxpkg
 **From source (manual)** — equivalent to `./install.sh` from a clone:
 
 ```bash
-git clone https://github.com/semitechnological/wax.git
+git clone https://github.com/tschk/wax.git
 cd wax
 cargo build --release
 cp target/release/wax ~/.local/bin/
