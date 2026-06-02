@@ -95,7 +95,7 @@ pub async fn self_update(
 
 pub async fn available_stable_update() -> Result<Option<String>> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| WaxError::SelfUpdateError(format!("HTTP client error: {e}")))?;
 
