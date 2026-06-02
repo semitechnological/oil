@@ -1,118 +1,110 @@
 # Linux Support
 
-## Overview
-wax now supports Linux alongside macOS. Core functionality (formula installation) works on both platforms, while macOS-specific features (casks) are properly guarded.
+Wax supports two Linux package flows:
 
-## Platform Detection
+1. **Homebrew/Linuxbrew formulae** — the traditional Wax formula/bottle path.
+2. **Wax-managed system packages** — `wax install`, `wax search`, and `wax system ...` can use Linux distribution registries and package archives directly.
 
-### Bottle Platform Detection
-- **macOS**: `arm64_sonoma`, `sonoma`, `arm64_ventura`, `ventura`, etc. (based on OS version)
-- **Linux**: `x86_64_linux`, `aarch64_linux`
+Wax-managed system packages are **Nix-like in UX/state only**. They are not a Nix replacement.
 
-### Homebrew Prefix Detection
-The system automatically detects the Homebrew installation location:
+## What “Wax-managed system packages” means
 
-**macOS**:
-- ARM64: `/opt/homebrew` (default)
-- x86_64: `/usr/local` (default)
-- Falls back to `brew --prefix` command
+Wax can:
 
-**Linux**:
-- Linuxbrew: `/home/linuxbrew/.linuxbrew` (default)
-- Falls back to `/usr/local` or `brew --prefix` command
+- detect a supported Linux package ecosystem
+- search distribution package metadata directly
+- resolve packages and dependencies from registry metadata
+- download distro package archives (`.rpm`, `.deb`, `.pkg.tar.*`, `.apk`)
+- extract files into a Wax/user prefix when not root
+- write manifests for tracked removal
+- run package post-install scripts by default where Wax can extract them (`.deb` `postinst`, RPM `%post`)
+- keep Wax-owned state and generations
 
-## Cross-Platform Directories
+Wax system packages must **not** hand installation/removal off to another package manager. The system package path does not run `apt install`, `dnf install`, `pacman -S`, `apk add`, `rpm -i`, `dpkg -i`, or equivalent host-PM mutating commands.
 
-Uses the `directories` crate for platform-appropriate paths:
+By default, Wax runs post-install scripts it can extract from package archives. Use `wax install --no-script ...` to skip automatic post-install scripts.
 
-**macOS**:
-- Cache: `~/Library/Caches/wax`
-- Data: `~/Library/Application Support/wax`
-- Logs: `~/Library/Caches/wax/logs`
+Wax does **not** provide:
 
-**Linux**:
-- Cache: `~/.cache/wax`
-- Data: `~/.local/share/wax`
-- Logs: `~/.cache/wax/logs`
+- Nix derivations
+- hermetic builds or isolated stores
+- reproducible build graphs
+- post-install script execution/triggers
+- systemd/user/group/kernel-module integration
+- guaranteed relocation for packages that assume `/usr`, `/etc`, `/var`, or root-owned system paths
 
-Fallback to `~/.wax` if directories cannot be determined.
+Host-provided dependencies may be treated as satisfied. Wax may use read-only inventory/capability queries such as `rpm -q --whatprovides` to avoid unpacking base OS packages, but those queries are not install/remove handoffs. This keeps CLI tools usable without unpacking base OS packages, but it also means installs are not hermetic.
 
-## Platform-Specific Features
+## Support matrix
 
-### Casks (macOS Only)
-Cask operations are restricted to macOS:
-- DMG mounting (`hdiutil`)
-- PKG installation
-- `/Applications` directory
-- App bundle management
+| Ecosystem | Registry backend | Archive extractor | Runtime default selection | Smoke tested | Status |
+| --- | --- | --- | --- | --- | --- |
+| Fedora / Ultramarine / DNF/Yum RPM | Yes | Yes | `/etc/os-release` `VERSION_ID` + `uname -m` | Yes: Ultramarine Linux 43, `ripgrep` install/remove | Supported preview |
+| Ubuntu / Debian APT | Yes | Yes | `/etc/os-release` `VERSION_CODENAME` / `UBUNTU_CODENAME` | Parser/extractor tests only | Experimental |
+| Arch / Pacman | Yes | Yes | rolling Arch mirror + runtime arch | Parser/extractor tests only | Experimental |
+| Alpine / APK | Yes | Yes | `/etc/os-release` `VERSION_ID` major/minor | Parser/extractor tests only | Experimental |
+| macOS | Separate Homebrew flow | Separate Homebrew flow | Homebrew prefix/platform detection | Existing Wax flow | Supported separately |
+| Windows | Separate Windows package-manager investigation | N/A for Linux system path | N/A | Not part of Linux system path | Separate work |
 
-On Linux, attempting cask operations returns:
-```
-Error: Operation not supported on this platform: Cask installation is only supported on macOS. Use formulae for Linux packages.
-```
+## Verified Fedora/Ultramarine behavior
 
-### Formulae (Cross-Platform)
-Core formula installation works on both platforms:
-- Bottle download and extraction
-- Symlink creation (`/usr/local/bin`, `/opt/homebrew/bin`, or `/home/linuxbrew/.linuxbrew/bin`)
-- Dependency resolution
-- Package state tracking
+The Fedora/DNF path has been smoke-tested on Ultramarine Linux 43 with a temporary `HOME`:
 
-## Implementation Details
-
-### Modified Files
-1. **src/error.rs**: Added `PlatformNotSupported` error variant
-2. **src/bottle.rs**: 
-   - Extended `detect_platform()` for Linux
-   - Updated `homebrew_prefix()` for Linuxbrew
-   - Added macOS-specific guards to `macos_version()`
-3. **src/cask.rs**:
-   - Added `check_platform_support()` guard
-   - Added `applications_dir()` helper
-   - Guarded DMG/PKG/ZIP installation methods
-4. **src/cache.rs**, **src/install.rs**: Use `directories` crate for cross-platform paths
-5. **src/main.rs**: Cross-platform log directory detection
-6. **src/commands/list.rs**: Enhanced Homebrew prefix detection
-7. **src/commands/uninstall.rs**: Guarded cask uninstallation
-
-### Platform Conditionals
-Uses Rust's `cfg!` and `#[cfg(...)]` for compile-time platform detection:
-- `#[cfg(target_os = "macos")]` - macOS-specific code
-- `#[cfg(not(target_os = "macos"))]` - Non-macOS fallback
-- `std::env::consts::OS` - Runtime OS detection ("macos", "linux")
-- `std::env::consts::ARCH` - Runtime architecture ("x86_64", "aarch64")
-
-## Testing
-
-### Compilation Test
 ```bash
-# Test macOS build (default)
-cargo build --release
-
-# Test Linux build (cross-compilation or on Linux)
-cargo check --target x86_64-unknown-linux-gnu
-cargo check --target aarch64-unknown-linux-gnu
+wax search ripgrep
+HOME=/tmp/wax-smoke-home wax install ripgrep
+/tmp/wax-smoke-home/.local/usr/bin/rg --version
+HOME=/tmp/wax-smoke-home wax system status
+HOME=/tmp/wax-smoke-home wax system remove ripgrep
 ```
 
-### Runtime Testing
-1. **Linux**: Install Homebrew/Linuxbrew first
-2. Test formula installation: `wax install wget`
-3. Verify error on cask attempt: `wax install --cask firefox` (should fail gracefully)
-4. Check platform detection: Look for correct bottle platform in logs
+Observed behavior:
 
-## Known Limitations
+- `wax search ripgrep` returns a registry result.
+- `wax install ripgrep` installs only `ripgrep` when host RPM capabilities already satisfy base dependencies.
+- The `rg` binary works from the Wax prefix.
+- The manifest records extracted files.
+- `wax system remove ripgrep` removes the tracked files and updates status.
 
-### Linux
-- Casks are not supported (macOS GUI apps)
-- Some formulae may not have Linux bottles available
-- System dependencies may differ from macOS
+## Command behavior
 
-### Both Platforms
-- Requires Homebrew/Linuxbrew installation
-- Unix-only (Windows not supported - symlinks are Unix-specific)
+On Linux, plain package commands prefer Wax’s system registry path when no formula/cask/source modifiers are requested:
 
-## Future Enhancements
-- Add Linux-specific package formats (AppImage, Flatpak) if casks are requested on Linux
-- Improve error messages when bottles aren't available for Linux
-- Add platform-specific configuration options
-- Support for custom Homebrew installation paths
+```bash
+wax search ripgrep
+wax install ripgrep
+wax system status
+wax system remove ripgrep
+```
+
+Use explicit ecosystem/package qualifiers when you want the non-system formula/ecosystem path.
+
+## Known limitations
+
+- Post-install scripts run under Wax with `WAX_INSTALL_PREFIX`/`WAX_ROOT` set, but scripts that require a full host package-manager transaction, system users/groups, services, triggers, or kernel integration may still fail.
+- Packages with hardcoded absolute paths may extract but fail at runtime.
+- Shared libraries already present on the host are generally not copied into the Wax prefix.
+- Root installs are not currently manifest-tracked as completely as user-prefix installs.
+- APT/Pacman/APK need real-distro smoke tests before being called supported.
+- Distribution metadata formats and mirrors change; registry parsing should be kept covered by tests.
+
+## Validation guidance
+
+For a new distro/backend, validate at least:
+
+```bash
+cargo check
+cargo test system::
+wax search ripgrep
+HOME=/tmp/wax-smoke-home wax install ripgrep
+HOME=/tmp/wax-smoke-home wax system status
+HOME=/tmp/wax-smoke-home wax system remove ripgrep
+```
+
+Then verify:
+
+- requested package is installed
+- base system dependencies are not unnecessarily unpacked into the prefix
+- manifest contains installed files
+- removal deletes tracked files
+- status reflects the installed/removed package count
