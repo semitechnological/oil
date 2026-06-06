@@ -171,7 +171,9 @@ async fn install_from_source_task(
                 }
                 copied_bins += 1;
             } else {
-                missing_bins.push(target.source.clone());
+                if !target.optional {
+                    missing_bins.push(target.source.clone());
+                }
             }
         }
         if !missing_bins.is_empty() {

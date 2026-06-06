@@ -14,6 +14,8 @@ use tempfile::TempDir;
 use tokio::sync::Semaphore;
 use tracing::debug;
 
+type PackageManifestData = (usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>);
+
 pub struct SystemInstaller {
     downloader: Arc<BottleDownloader>,
 }
@@ -133,7 +135,7 @@ impl SystemInstaller {
                 let (files, dirs) = extract_package_tracked(&dest, &prefix_buf)?;
                 debug!("Extracted {} to {:?}", pkg_name, prefix_buf);
 
-                Ok::<(usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>), WaxError>((
+                Ok::<PackageManifestData, WaxError>((
                     index,
                     pkg_name,
                     pkg_version,
@@ -145,8 +147,7 @@ impl SystemInstaller {
         }
 
         let mut installed = Vec::new();
-        let mut manifest_data: Vec<(usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>)> =
-            Vec::new();
+        let mut manifest_data: Vec<PackageManifestData> = Vec::new();
 
         let mut failures = Vec::new();
         for task in tasks {

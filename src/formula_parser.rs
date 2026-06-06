@@ -19,6 +19,7 @@ pub enum BuildSystem {
 pub struct BinInstall {
     pub source: String,
     pub destination: String,
+    pub optional: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,9 +325,9 @@ impl FormulaParser {
         let re = Regex::new(r#"bin\.install\s+"([^"]+)"(?:\s*=>\s*"([^"]+)")?"#).unwrap();
         let dir_re =
             Regex::new(r#"bin\.install\s+Dir\["([^"]+)"\]\.first(?:\s*=>\s*"([^"]+)")?"#).unwrap();
-        let mut targets: Vec<BinInstall> = re
-            .captures_iter(install_block)
-            .map(|c| {
+        let mut targets: Vec<BinInstall> = Vec::new();
+        for line in install_block.lines() {
+            targets.extend(re.captures_iter(line).map(|c| {
                 let source = c[1].to_string();
                 let destination = c.get(2).map(|m| m.as_str().to_string()).unwrap_or_else(|| {
                     source
@@ -337,21 +338,23 @@ impl FormulaParser {
                 });
                 BinInstall {
                     destination,
+                    optional: line.contains("if File.exist?"),
                     source,
                 }
-            })
-            .collect();
-        targets.extend(dir_re.captures_iter(install_block).map(|c| {
-            let source = c[1].to_string();
-            let destination = c
-                .get(2)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_else(|| source.clone());
-            BinInstall {
-                destination,
-                source,
-            }
-        }));
+            }));
+            targets.extend(dir_re.captures_iter(line).map(|c| {
+                let source = c[1].to_string();
+                let destination = c
+                    .get(2)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_else(|| source.clone());
+                BinInstall {
+                    destination,
+                    optional: line.contains("if File.exist?"),
+                    source,
+                }
+            }));
+        }
         targets
     }
 
@@ -807,6 +810,17 @@ end
             bins,
             vec!["poke-around", "poke-around-bridge.js", "menubar_linux.py"]
         );
+    }
+
+    #[test]
+    fn extract_bin_install_targets_marks_file_exist_conditionals_optional() {
+        let install_block = r#"
+    bin.install "poke-around"
+    bin.install "menubar_linux.py" if File.exist?("menubar_linux.py")
+"#;
+        let bins = FormulaParser::extract_bin_install_targets(install_block);
+        assert!(!bins[0].optional);
+        assert!(bins[1].optional);
     }
 
     #[test]
