@@ -20,6 +20,7 @@ mod sudo;
 mod system;
 mod system_pm;
 mod tap;
+mod timing;
 mod ui;
 mod version;
 mod winget_install;
@@ -57,6 +58,21 @@ fn should_refresh_state(command: &Commands) -> bool {
             | Commands::Tap { repair: true, .. }
             | Commands::Doctor { fix: true, .. }
             | Commands::Bundle { dry_run: false, .. }
+    )
+}
+
+fn command_prints_timing(command: &Commands) -> bool {
+    matches!(
+        command,
+        Commands::Update { .. }
+            | Commands::Install { .. }
+            | Commands::InstallCask { .. }
+            | Commands::Uninstall { .. }
+            | Commands::Reinstall { .. }
+            | Commands::Upgrade { .. }
+            | Commands::Outdated
+            | Commands::Sync
+            | Commands::Bundle { .. }
     )
 }
 
@@ -124,7 +140,7 @@ struct Cli {
         alias = "tta",
         alias = "time",
         global = true,
-        help = "Print startup time before running the command"
+        help = "Show command duration in result output"
     )]
     time_to_action: bool,
 }
@@ -619,13 +635,11 @@ async fn main() -> Result<()> {
         let _ = cmd.print_help();
         std::process::exit(2);
     };
+    let command_prints_own_timing = command_prints_timing(&command);
 
     let api_client = ApiClient::new();
     let cache = Cache::new()?;
-
-    if cli.time_to_action {
-        eprintln!("time to action: {}ms", action_timer.elapsed().as_millis());
-    }
+    timing::set_enabled(cli.time_to_action);
 
     let result = match command {
         Commands::Update {
@@ -936,6 +950,10 @@ async fn main() -> Result<()> {
             }
         }
         std::process::exit(1);
+    }
+
+    if cli.time_to_action && !command_prints_own_timing {
+        println!("{}", timing::elapsed_text(action_timer.elapsed()));
     }
 
     Ok(())
