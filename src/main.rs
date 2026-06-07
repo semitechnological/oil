@@ -29,6 +29,7 @@ use cache::Cache;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::Shell;
 use error::Result;
+use std::time::Instant;
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use version::WAX_VERSION;
@@ -117,6 +118,13 @@ struct Cli {
 
     #[arg(short, long, global = true, help = "Assume yes for all prompts")]
     yes: bool,
+
+    #[arg(
+        long,
+        global = true,
+        help = "Print startup time before running the command"
+    )]
+    time_to_action: bool,
 }
 
 #[derive(Subcommand)]
@@ -588,6 +596,7 @@ async fn handle_system_upgrade() -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let action_timer = Instant::now();
     let cli = Cli::parse();
 
     if let Some(ref command) = cli.command {
@@ -611,6 +620,10 @@ async fn main() -> Result<()> {
 
     let api_client = ApiClient::new();
     let cache = Cache::new()?;
+
+    if cli.time_to_action {
+        eprintln!("time to action: {}ms", action_timer.elapsed().as_millis());
+    }
 
     let result = match command {
         Commands::Update {

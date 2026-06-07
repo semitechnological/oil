@@ -101,29 +101,9 @@ async fn install_from_source_task(
 
         // Extract tarball.
         let temp_dir = TempDir::new()?;
-        let archive_ext = if dl_url.ends_with(".tar.gz") || dl_url.ends_with(".tgz") {
-            "tar.gz"
-        } else {
-            "tar.bz2"
-        };
-        let archive_path = temp_dir
-            .path()
-            .join(format!("{}.{}", formula.name, archive_ext));
-        let extract_dir = temp_dir.path().join("extracted");
-        tokio::fs::write(&archive_path, &bytes).await?;
-        tokio::fs::create_dir_all(&extract_dir).await?;
-
-        let tar_output = tokio::process::Command::new("tar")
-            .args(["xf", &archive_path.to_string_lossy(), "-C"])
-            .arg(&extract_dir)
-            .output()
-            .await?;
-        if !tar_output.status.success() {
-            return Err(WaxError::BuildError(format!(
-                "Failed to extract tarball: {}",
-                String::from_utf8_lossy(&tar_output.stderr)
-            )));
-        }
+        let extract_dir =
+            stage_binary_release_download(bytes.as_ref(), &dl_url, &formula.name, temp_dir.path())
+                .await?;
 
         // Find the single extracted subdirectory, or use extract_dir itself.
         let src_dir = std::fs::read_dir(&extract_dir)
@@ -350,6 +330,75 @@ async fn resolve_bin_install_source(root: &Path, source: &str) -> Result<std::pa
             source
         ))),
     }
+}
+
+async fn stage_binary_release_download(
+    bytes: &[u8],
+    dl_url: &str,
+    formula_name: &str,
+    temp_dir: &Path,
+) -> Result<PathBuf> {
+    let extract_dir = temp_dir.join("extracted");
+    tokio::fs::create_dir_all(&extract_dir).await?;
+
+    if binary_release_url_is_archive(dl_url) {
+        let archive_path = temp_dir.join(binary_release_download_filename(dl_url, formula_name));
+        tokio::fs::write(&archive_path, bytes).await?;
+
+        let tar_output = tokio::process::Command::new("tar")
+            .arg("xf")
+            .arg(&archive_path)
+            .arg("-C")
+            .arg(&extract_dir)
+            .output()
+            .await?;
+        if !tar_output.status.success() {
+            return Err(WaxError::BuildError(format!(
+                "Failed to extract tarball: {}",
+                String::from_utf8_lossy(&tar_output.stderr)
+            )));
+        }
+    } else {
+        tokio::fs::write(
+            extract_dir.join(binary_release_download_filename(dl_url, formula_name)),
+            bytes,
+        )
+        .await?;
+    }
+
+    Ok(extract_dir)
+}
+
+fn binary_release_url_is_archive(url: &str) -> bool {
+    let path = url
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .split('#')
+        .next()
+        .unwrap_or(url);
+    path.ends_with(".tar.gz")
+        || path.ends_with(".tgz")
+        || path.ends_with(".tar.bz2")
+        || path.ends_with(".tbz")
+        || path.ends_with(".tar.xz")
+        || path.ends_with(".txz")
+        || path.ends_with(".tar")
+}
+
+fn binary_release_download_filename(url: &str, formula_name: &str) -> String {
+    let path = url
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .split('#')
+        .next()
+        .unwrap_or(url);
+    path.rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(formula_name)
+        .to_string()
 }
 
 /// Clone and build from a formula's HEAD git URL.
@@ -2518,7 +2567,8 @@ async fn install_from_downloaded(
 #[cfg(test)]
 mod tests {
     use super::{
-        check_already_installed_formula_linkages_with_cellar, tap_name_from_qualified_package,
+        check_already_installed_formula_linkages_with_cellar, stage_binary_release_download,
+        tap_name_from_qualified_package,
     };
     use crate::install::{InstallMode, InstalledPackage};
     use std::collections::HashMap;
@@ -2572,5 +2622,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(checked, vec![version_dir]);
+    }
+
+    #[tokio::test]
+    async fn binary_release_staging_keeps_direct_executable_downloads() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let src_dir = stage_binary_release_download(
+            b"#!/bin/sh\n",
+            "https://static.ampcode.com/cli/1.0.0/amp-darwin-arm64",
+            "ampcode",
+            tmp.path(),
+        )
+        .await
+        .unwrap();
+
+        let staged = src_dir.join("amp-darwin-arm64");
+        assert_eq!(std::fs::read(staged).unwrap(), b"#!/bin/sh\n");
     }
 }
