@@ -67,9 +67,30 @@ impl SystemManager {
     }
 
     pub async fn upgrade_all(&self) -> Result<()> {
-        Err(WaxError::PlatformNotSupported(
-            "wax system upgrade is not implemented yet".to_string(),
-        ))
+        let mut state = SystemState::load().await?;
+        self.refresh_tracked_state(&mut state).await?;
+        state.save().await?;
+
+        let index = self.load_registry().await?;
+        let upgrades = packages_requiring_upgrade(&state.installed_packages(), &index);
+
+        if upgrades.is_empty() {
+            println!(
+                "{} all Wax-managed system packages are up to date",
+                style("✓").green()
+            );
+            return Ok(());
+        }
+
+        println!("upgrading {} Wax-managed system packages:", upgrades.len());
+        for package in &upgrades {
+            println!("  {} {}", style("↻").cyan(), style(package).magenta());
+        }
+
+        self.snapshot(&format!("pre-upgrade {}", upgrades.join(" ")))
+            .await?;
+        self.remove_managed_packages(&upgrades).await?;
+        self.install_native(&upgrades, false, true).await
     }
 
     pub async fn install_with_options(&self, packages: &[String], run_scripts: bool) -> Result<()> {
@@ -625,5 +646,71 @@ impl SystemManager {
         }
 
         Ok(())
+    }
+}
+
+fn packages_requiring_upgrade(
+    installed: &[(String, Option<String>)],
+    index: &PackageIndex,
+) -> Vec<String> {
+    installed
+        .iter()
+        .filter_map(|(name, current)| {
+            let latest = index.find(name)?;
+            if current.as_deref() == Some(latest.version.as_str()) {
+                None
+            } else {
+                Some(name.clone())
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn package(name: &str, version: &str) -> PackageMetadata {
+        PackageMetadata {
+            name: name.to_string(),
+            version: version.to_string(),
+            description: String::new(),
+            download_url: String::new(),
+            sha256: None,
+            installed_size: 0,
+            depends: vec![],
+            provides: vec![],
+        }
+    }
+
+    #[test]
+    fn packages_requiring_upgrade_only_returns_changed_versions() {
+        let index = PackageIndex {
+            packages: vec![package("curl", "8.1.0"), package("ripgrep", "14.1.1")],
+        };
+        let installed = vec![
+            ("curl".to_string(), Some("8.0.0".to_string())),
+            ("ripgrep".to_string(), Some("14.1.1".to_string())),
+        ];
+
+        assert_eq!(packages_requiring_upgrade(&installed, &index), vec!["curl"]);
+    }
+
+    #[test]
+    fn packages_requiring_upgrade_treats_missing_version_as_outdated() {
+        let index = PackageIndex {
+            packages: vec![package("curl", "8.1.0")],
+        };
+        let installed = vec![("curl".to_string(), None)];
+
+        assert_eq!(packages_requiring_upgrade(&installed, &index), vec!["curl"]);
+    }
+
+    #[test]
+    fn packages_requiring_upgrade_ignores_packages_missing_from_registry() {
+        let index = PackageIndex { packages: vec![] };
+        let installed = vec![("local-only".to_string(), Some("1.0.0".to_string()))];
+
+        assert!(packages_requiring_upgrade(&installed, &index).is_empty());
     }
 }

@@ -29,7 +29,7 @@ Wax does **not** provide:
 - Nix derivations
 - hermetic builds or isolated stores
 - reproducible build graphs
-- post-install script execution/triggers
+- full package-manager transaction triggers
 - systemd/user/group/kernel-module integration
 - guaranteed relocation for packages that assume `/usr`, `/etc`, `/var`, or root-owned system paths
 
@@ -55,6 +55,7 @@ wax search ripgrep
 HOME=/tmp/wax-smoke-home wax install ripgrep
 /tmp/wax-smoke-home/.local/usr/bin/rg --version
 HOME=/tmp/wax-smoke-home wax system status
+HOME=/tmp/wax-smoke-home wax system upgrade
 HOME=/tmp/wax-smoke-home wax system remove ripgrep
 ```
 
@@ -64,6 +65,7 @@ Observed behavior:
 - `wax install ripgrep` installs only `ripgrep` when host RPM capabilities already satisfy base dependencies.
 - The `rg` binary works from the Wax prefix.
 - The manifest records extracted files.
+- `wax system upgrade` compares Wax-managed package versions with registry metadata and reinstalls outdated packages through Wax.
 - `wax system remove ripgrep` removes the tracked files and updates status.
 
 ## Command behavior
@@ -74,6 +76,7 @@ On Linux, plain package commands prefer Wax’s system registry path when no for
 wax search ripgrep
 wax install ripgrep
 wax system status
+wax system upgrade
 wax system remove ripgrep
 ```
 
@@ -84,7 +87,7 @@ Use explicit ecosystem/package qualifiers when you want the non-system formula/e
 - Post-install scripts run under Wax with `WAX_INSTALL_PREFIX`/`WAX_ROOT` set, but scripts that require a full host package-manager transaction, system users/groups, services, triggers, or kernel integration may still fail.
 - Packages with hardcoded absolute paths may extract but fail at runtime.
 - Shared libraries already present on the host are generally not copied into the Wax prefix.
-- Root installs are not currently manifest-tracked as completely as user-prefix installs.
+- System packages install to `~/.local` by default, even as root. Set `WAX_SYSTEM_PREFIX=/` only when you explicitly want root-owned system paths.
 - APT/Pacman/APK need real-distro smoke tests before being called supported.
 - Distribution metadata formats and mirrors change; registry parsing should be kept covered by tests.
 
@@ -98,6 +101,7 @@ cargo test system::
 wax search ripgrep
 HOME=/tmp/wax-smoke-home wax install ripgrep
 HOME=/tmp/wax-smoke-home wax system status
+HOME=/tmp/wax-smoke-home wax system upgrade
 HOME=/tmp/wax-smoke-home wax system remove ripgrep
 ```
 

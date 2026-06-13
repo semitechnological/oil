@@ -229,21 +229,54 @@ impl SystemInstaller {
 
     /// Determine the install prefix based on whether we have root.
     pub fn install_prefix() -> std::path::PathBuf {
-        // If running as root, install to system root
-        #[cfg(unix)]
-        if unsafe { libc::getuid() } == 0 {
-            return std::path::PathBuf::from("/");
+        if let Ok(prefix) = std::env::var("WAX_SYSTEM_PREFIX") {
+            if !prefix.trim().is_empty() {
+                return std::path::PathBuf::from(prefix);
+            }
         }
 
-        // Non-root: install to ~/.local
         if let Ok(home) = std::env::var("HOME") {
             return std::path::PathBuf::from(home).join(".local");
         }
 
-        // Last resort: ~/.wax/system/root
         crate::ui::dirs::wax_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
             .join("system")
             .join("root")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::OnceLock;
+    use tempfile::TempDir;
+    use tokio::sync::Mutex;
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[tokio::test]
+    async fn install_prefix_defaults_to_home_local() {
+        let _guard = env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("WAX_SYSTEM_PREFIX");
+
+        assert_eq!(SystemInstaller::install_prefix(), tmp.path().join(".local"));
+    }
+
+    #[tokio::test]
+    async fn install_prefix_uses_explicit_system_prefix() {
+        let _guard = env_lock().lock().await;
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path().join("system-root");
+        std::env::set_var("HOME", tmp.path());
+        std::env::set_var("WAX_SYSTEM_PREFIX", &prefix);
+
+        assert_eq!(SystemInstaller::install_prefix(), prefix);
+        std::env::remove_var("WAX_SYSTEM_PREFIX");
     }
 }
