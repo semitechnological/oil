@@ -3,8 +3,8 @@
 /// .apk files are concatenated gzip streams:
 ///   - First stream: signature (skip it)
 ///   - Second stream: actual tar archive with the package contents
-use crate::error::{Result, WaxError};
-use flate2::read::GzDecoder;
+use crate::error::Result;
+use flate2::read::MultiGzDecoder;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::Archive;
@@ -13,31 +13,8 @@ use tar::Archive;
 pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     std::fs::create_dir_all(dest_dir)?;
     let data = std::fs::read(path)?;
-
-    // Find the second gzip magic (0x1f 0x8b) to skip the signature stream
-    let payload_start = find_second_gz_magic(&data).ok_or_else(|| {
-        WaxError::InstallError("Could not find second gzip stream in .apk file".to_string())
-    })?;
-
-    let payload = &data[payload_start..];
-    let decoder = GzDecoder::new(payload);
+    let decoder = MultiGzDecoder::new(&data[..]);
     untar(decoder, dest_dir)
-}
-
-fn find_second_gz_magic(data: &[u8]) -> Option<usize> {
-    if data.len() < 2 {
-        return None;
-    }
-    // Skip the first gzip stream by finding gzip EOF, then look for the next magic
-    // Strategy: scan from byte 2 onwards for the 0x1f 0x8b magic
-    let mut i = 2;
-    while i + 1 < data.len() {
-        if data[i] == 0x1f && data[i + 1] == 0x8b {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
 }
 
 fn untar<R: Read>(reader: R, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {

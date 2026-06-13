@@ -7,7 +7,7 @@ use crate::system::scripts::run_post_install_script;
 use crate::ui::{ProgressBarGuard, PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use sha2::Digest;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -132,7 +132,8 @@ impl SystemInstaller {
                 }
 
                 // Extract package and track files.
-                let (files, dirs) = extract_package_tracked(&dest, &prefix_buf)?;
+                let (mut files, dirs) = extract_package_tracked(&dest, &prefix_buf)?;
+                wrap_prefix_commands(&prefix_buf, &mut files)?;
                 debug!("Extracted {} to {:?}", pkg_name, prefix_buf);
 
                 Ok::<PackageManifestData, WaxError>((
@@ -243,6 +244,62 @@ impl SystemInstaller {
             .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
             .join("system")
             .join("root")
+    }
+}
+
+fn wrap_prefix_commands(prefix: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
+    let bin_dir = prefix.join("usr").join("bin");
+    let lib_dir = prefix.join("usr").join("lib");
+    let lib64_dir = prefix.join("usr").join("lib64");
+    let real_dir = prefix.join(".wax-real").join("usr").join("bin");
+
+    let mut additions = Vec::new();
+    for file in files.iter() {
+        if file.parent() != Some(bin_dir.as_path()) || !is_elf(file)? {
+            continue;
+        }
+
+        std::fs::create_dir_all(&real_dir)?;
+        let Some(name) = file.file_name() else {
+            continue;
+        };
+        let real_path = real_dir.join(name);
+        if real_path.exists() {
+            std::fs::remove_file(&real_path)?;
+        }
+        std::fs::rename(file, &real_path)?;
+
+        let script = format!(
+            "#!/bin/sh\nexport LD_LIBRARY_PATH=\"{}:{}:${{LD_LIBRARY_PATH:-}}\"\nexec \"{}\" \"$@\"\n",
+            lib_dir.display(),
+            lib64_dir.display(),
+            real_path.display()
+        );
+        let mut wrapper = std::fs::File::create(file)?;
+        wrapper.write_all(script.as_bytes())?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = wrapper.metadata()?.permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(file, perms)?;
+        }
+
+        additions.push(real_path);
+    }
+
+    files.extend(additions);
+    Ok(())
+}
+
+fn is_elf(path: &Path) -> Result<bool> {
+    let mut file = std::fs::File::open(path)?;
+    let mut magic = [0u8; 4];
+    match file.read_exact(&mut magic) {
+        Ok(()) => Ok(magic == [0x7f, b'E', b'L', b'F']),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e.into()),
     }
 }
 

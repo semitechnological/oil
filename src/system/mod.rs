@@ -286,8 +286,6 @@ impl SystemManager {
             return Ok(());
         }
 
-        self.warn_if_experimental_backend();
-
         let index = self.load_registry().await?;
         let resolver = Resolver::new(&index);
         let resolved =
@@ -377,19 +375,6 @@ impl SystemManager {
         }
         println!("{} snapshot gen-{}", style("→").cyan(), style(gen.id).dim());
         Ok(())
-    }
-
-    fn warn_if_experimental_backend(&self) {
-        match self.pm {
-            SystemPm::Apt | SystemPm::Pacman | SystemPm::Apk => {
-                eprintln!(
-                    "{} {} system installs are experimental; Fedora/DNF is the currently smoke-tested Linux backend",
-                    style("warning:").yellow(),
-                    self.pm.name()
-                );
-            }
-            _ => {}
-        }
     }
 
     fn host_dependency_satisfied(&self, dependency: &str) -> bool {

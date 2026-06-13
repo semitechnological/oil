@@ -40,9 +40,9 @@ Host-provided dependencies may be treated as satisfied. Wax may use read-only in
 | Ecosystem | Registry backend | Archive extractor | Runtime default selection | Smoke tested | Status |
 | --- | --- | --- | --- | --- | --- |
 | Fedora / Ultramarine / DNF/Yum RPM | Yes | Yes | `/etc/os-release` `VERSION_ID` + `uname -m` | Yes: Ultramarine Linux 43, `ripgrep` install/remove | Supported preview |
-| Ubuntu / Debian APT | Yes | Yes | `/etc/os-release` `VERSION_CODENAME` / `UBUNTU_CODENAME` | Parser/extractor tests only | Experimental |
-| Arch / Pacman | Yes | Yes | rolling Arch mirror + runtime arch | Parser/extractor tests only | Experimental |
-| Alpine / APK | Yes | Yes | `/etc/os-release` `VERSION_ID` major/minor | Parser/extractor tests only | Experimental |
+| Ubuntu / Debian APT | Yes | Yes | `/etc/os-release` `VERSION_CODENAME` / `UBUNTU_CODENAME` | Yes: Debian Bookworm container, `ripgrep` install/remove | Supported preview |
+| Arch / Pacman | Yes | Yes | rolling Arch mirror + runtime arch | Yes: Arch container, `ripgrep` install/remove | Supported preview |
+| Alpine / APK | Yes | Yes | `/etc/os-release` `VERSION_ID` major/minor | Yes: Alpine 3.24 container, `ripgrep` install/remove | Supported preview |
 | macOS | Separate Homebrew flow | Separate Homebrew flow | Homebrew prefix/platform detection | Existing Wax flow | Supported separately |
 | Windows | Separate Windows package-manager investigation | N/A for Linux system path | N/A | Not part of Linux system path | Separate work |
 
@@ -68,6 +68,27 @@ Observed behavior:
 - `wax system upgrade` compares Wax-managed package versions with registry metadata and reinstalls outdated packages through Wax.
 - `wax system remove ripgrep` removes the tracked files and updates status.
 
+## Verified container behavior
+
+APT, Pacman, and APK were smoke-tested in distro containers using the same `ripgrep` flow:
+
+```bash
+wax system search ripgrep
+HOME=/tmp/wax-smoke-home wax system install ripgrep --no-script
+/tmp/wax-smoke-home/.local/usr/bin/rg --version
+HOME=/tmp/wax-smoke-home wax system status
+HOME=/tmp/wax-smoke-home wax system upgrade
+HOME=/tmp/wax-smoke-home wax system remove ripgrep
+```
+
+Observed behavior:
+
+- registry search returns distro package metadata
+- package archives and dependencies are downloaded by Wax
+- archive extraction writes tracked manifests
+- extracted commands run from the Wax prefix
+- upgrade and remove operate on Wax-managed state
+
 ## Command behavior
 
 On Linux, plain package commands prefer Wax’s system registry path when no formula/cask/source modifiers are requested:
@@ -88,7 +109,6 @@ Use explicit ecosystem/package qualifiers when you want the non-system formula/e
 - Packages with hardcoded absolute paths may extract but fail at runtime.
 - Shared libraries already present on the host are generally not copied into the Wax prefix.
 - System packages install to `~/.local` by default, even as root. Set `WAX_SYSTEM_PREFIX=/` only when you explicitly want root-owned system paths.
-- APT/Pacman/APK need real-distro smoke tests before being called supported.
 - Distribution metadata formats and mirrors change; registry parsing should be kept covered by tests.
 
 ## Validation guidance

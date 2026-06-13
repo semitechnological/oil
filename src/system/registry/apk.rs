@@ -1,9 +1,8 @@
 use super::{PackageIndex, PackageMetadata};
 use crate::error::{Result, WaxError};
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use std::io::Read;
 use std::time::{Duration, SystemTime};
-use tar::Archive;
 use tracing::{debug, warn};
 
 pub struct ApkRegistry {
@@ -70,7 +69,7 @@ impl ApkRegistry {
         let mut all_packages: Vec<PackageMetadata> = Vec::new();
 
         for repo in &self.repos {
-            let url = format!("{}/{}/{}/APKINDEX.tar.gz", self.mirror, self.branch, repo);
+            let url = self.index_url(repo);
             debug!("Fetching {}", url);
 
             let resp = client.get(&url).send().await.map_err(|e| {
@@ -90,39 +89,15 @@ impl ApkRegistry {
                 WaxError::InstallError(format!("Failed to read APK index body: {}", e))
             })?;
 
-            // APKINDEX.tar.gz is a gzipped tar containing an "APKINDEX" file
-            let decoder = GzDecoder::new(&bytes[..]);
-            let mut archive = Archive::new(decoder);
-
-            for entry in archive.entries().map_err(|e| {
-                WaxError::InstallError(format!("Failed to read APKINDEX tar: {}", e))
-            })? {
-                let mut entry = entry.map_err(|e| {
-                    WaxError::InstallError(format!("Failed to read tar entry: {}", e))
-                })?;
-
-                let path = entry.path().map_err(|e| {
-                    WaxError::InstallError(format!("Failed to get entry path: {}", e))
-                })?;
-
-                if path.to_string_lossy() == "APKINDEX" {
-                    let mut content = String::new();
-                    entry.read_to_string(&mut content).map_err(|e| {
-                        WaxError::InstallError(format!("Failed to read APKINDEX: {}", e))
-                    })?;
-
-                    let pkgs =
-                        parse_apkindex(&content, &self.mirror, &self.branch, repo, &self.arch);
-                    debug!(
-                        "Parsed {} packages from {}/{}",
-                        pkgs.len(),
-                        self.branch,
-                        repo
-                    );
-                    all_packages.extend(pkgs);
-                    break;
-                }
-            }
+            let pkgs =
+                parse_apkindex_archive(&bytes, &self.mirror, &self.branch, repo, &self.arch)?;
+            debug!(
+                "Parsed {} packages from {}/{}",
+                pkgs.len(),
+                self.branch,
+                repo
+            );
+            all_packages.extend(pkgs);
         }
 
         // Deduplicate
@@ -135,6 +110,13 @@ impl ApkRegistry {
         Ok(PackageIndex {
             packages: all_packages,
         })
+    }
+
+    fn index_url(&self, repo: &str) -> String {
+        format!(
+            "{}/{}/{}/{}/APKINDEX.tar.gz",
+            self.mirror, self.branch, repo, self.arch
+        )
     }
 }
 
@@ -152,6 +134,79 @@ fn branch_from_os_release(os_release: &str) -> Option<String> {
     let major = parts.next()?;
     let minor = parts.next()?;
     Some(format!("v{major}.{minor}"))
+}
+
+fn is_apkindex_entry(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name == "APKINDEX")
+        .unwrap_or(false)
+}
+
+fn parse_apkindex_archive(
+    bytes: &[u8],
+    mirror: &str,
+    branch: &str,
+    repo: &str,
+    arch: &str,
+) -> Result<Vec<PackageMetadata>> {
+    let mut decoder = MultiGzDecoder::new(bytes);
+    let mut tar = Vec::new();
+    decoder
+        .read_to_end(&mut tar)
+        .map_err(|e| WaxError::InstallError(format!("Failed to decompress APKINDEX: {}", e)))?;
+
+    let mut offset = 0usize;
+    while offset + 512 <= tar.len() {
+        let header = &tar[offset..offset + 512];
+        if header.iter().all(|byte| *byte == 0) {
+            break;
+        }
+
+        let name = tar_header_string(&header[0..100]);
+        let size = tar_header_size(&header[124..136])?;
+        let data_start = offset + 512;
+        let data_end = data_start
+            .checked_add(size)
+            .ok_or_else(|| WaxError::InstallError("APKINDEX tar entry too large".to_string()))?;
+        if data_end > tar.len() {
+            return Err(WaxError::InstallError(
+                "APKINDEX tar entry is truncated".to_string(),
+            ));
+        }
+
+        if name
+            .as_deref()
+            .map(|name| is_apkindex_entry(std::path::Path::new(name)))
+            .unwrap_or(false)
+        {
+            let content = std::str::from_utf8(&tar[data_start..data_end])
+                .map_err(|e| WaxError::InstallError(format!("APKINDEX is not UTF-8: {}", e)))?;
+            return Ok(parse_apkindex(content, mirror, branch, repo, arch));
+        }
+
+        offset = data_start + size.div_ceil(512) * 512;
+    }
+
+    Ok(Vec::new())
+}
+
+fn tar_header_string(bytes: &[u8]) -> Option<String> {
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    if end == 0 {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&bytes[..end]).to_string())
+}
+
+fn tar_header_size(bytes: &[u8]) -> Result<usize> {
+    let text = String::from_utf8_lossy(bytes);
+    let text = text.trim_matches(char::from(0)).trim();
+    usize::from_str_radix(text, 8)
+        .map_err(|e| WaxError::InstallError(format!("invalid APKINDEX tar size: {}", e)))
 }
 
 fn parse_apkindex(
@@ -243,6 +298,30 @@ mod tests {
     }
 
     #[test]
+    fn index_url_includes_architecture_segment() {
+        let registry = ApkRegistry::new("https://dl-cdn.alpinelinux.org/alpine", "v3.24");
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "x86_64",
+            "aarch64" => "aarch64",
+            "arm" => "armv7",
+            _ => "x86_64",
+        };
+
+        assert_eq!(
+            registry.index_url("community"),
+            format!("https://dl-cdn.alpinelinux.org/alpine/v3.24/community/{arch}/APKINDEX.tar.gz")
+        );
+    }
+
+    #[test]
+    fn apkindex_entry_matches_plain_and_nested_paths() {
+        assert!(is_apkindex_entry(std::path::Path::new("APKINDEX")));
+        assert!(is_apkindex_entry(std::path::Path::new("./APKINDEX")));
+        assert!(is_apkindex_entry(std::path::Path::new("repo/APKINDEX")));
+        assert!(!is_apkindex_entry(std::path::Path::new("DESCRIPTION")));
+    }
+
+    #[test]
     fn test_parse_apkindex_basic() {
         let content = "P:ripgrep\nV:14.1.1-r0\nT:Search tool\nI:12345\nD:so:libc.musl-x86_64.so.1 pcre2\np:rg=14.1.1-r0\n\n";
         let packages = parse_apkindex(
@@ -263,5 +342,42 @@ mod tests {
             pkg.download_url,
             "https://dl-cdn.alpinelinux.org/alpine/v3.20/community/x86_64/ripgrep-14.1.1-r0.apk"
         );
+    }
+
+    #[test]
+    fn parse_apkindex_archive_reads_apkindex_member() {
+        let mut tarball = Vec::new();
+        {
+            let encoder = flate2::write::GzEncoder::new(&mut tarball, flate2::Compression::fast());
+            let mut archive = tar::Builder::new(encoder);
+            let signature = b"signature";
+            let mut signature_header = tar::Header::new_gnu();
+            signature_header
+                .set_path(".SIGN.RSA.alpine-devel@example.rsa.pub")
+                .unwrap();
+            signature_header.set_size(signature.len() as u64);
+            signature_header.set_cksum();
+            archive.append(&signature_header, &signature[..]).unwrap();
+
+            let content = b"P:ripgrep\nV:15.1.0-r0\nT:Search tool\nI:12345\nD:so:libc.musl-aarch64.so.1\np:cmd:rg=15.1.0-r0\n\n";
+            let mut header = tar::Header::new_gnu();
+            header.set_path("APKINDEX").unwrap();
+            header.set_size(content.len() as u64);
+            header.set_cksum();
+            archive.append(&header, &content[..]).unwrap();
+            archive.finish().unwrap();
+        }
+
+        let packages = parse_apkindex_archive(
+            &tarball,
+            "https://dl-cdn.alpinelinux.org/alpine",
+            "v3.24",
+            "community",
+            "aarch64",
+        )
+        .unwrap();
+
+        assert_eq!(packages.len(), 1);
+        assert_eq!(packages[0].name, "ripgrep");
     }
 }
