@@ -1,4 +1,4 @@
-name: Release Build
+name: CI / Release
 
 on:
   push:
@@ -7,6 +7,10 @@ on:
       - master
     tags:
       - 'v*'
+  pull_request:
+    branches:
+      - main
+      - master
   workflow_dispatch:
     inputs:
       version:
@@ -17,6 +21,25 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cargo check
+        run: cargo check
+
+      - name: cargo test
+        run: cargo test
+
+      - name: cargo clippy
+        run: cargo clippy -- -D warnings
+        continue-on-error: true
   check-version:
     name: Check for version bump
     runs-on: ubuntu-latest
@@ -169,40 +192,40 @@ jobs:
             platform: linux
             arch: x64
             target: x86_64-unknown-linux-gnu
-            binary_name: wax
-            asset_name: wax-linux-x64
+            binary_name: oil
+            asset_name: oil-linux-x64
 
           - os: ubuntu-latest
             platform: linux
             arch: arm64
             target: aarch64-unknown-linux-gnu
-            binary_name: wax
-            asset_name: wax-linux-arm64
+            binary_name: oil
+            asset_name: oil-linux-arm64
 
           - os: macos-latest
             platform: macos
             arch: x64
             target: x86_64-apple-darwin
-            binary_name: wax
-            asset_name: wax-macos-x64
+            binary_name: oil
+            asset_name: oil-macos-x64
 
           - os: macos-latest
             platform: macos
             arch: arm64
             target: aarch64-apple-darwin
-            binary_name: wax
-            asset_name: wax-macos-arm64
+            binary_name: oil
+            asset_name: oil-macos-arm64
 
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            binary_name: wax.exe
-            asset_name: wax-windows-x64.exe
+            binary_name: oil.exe
+            asset_name: oil-windows-x64.exe
             use_cross: false
 
           - os: windows-11-arm
             target: aarch64-pc-windows-msvc
-            binary_name: wax.exe
-            asset_name: wax-windows-arm64.exe
+            binary_name: oil.exe
+            asset_name: oil-windows-arm64.exe
             use_cross: false
 
     steps:
@@ -245,7 +268,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item "target/${{ matrix.target }}/release/wax.exe" "${{ matrix.asset_name }}"
+          Copy-Item "target/${{ matrix.target }}/release/oil.exe" "${{ matrix.asset_name }}"
           $h = (Get-FileHash "${{ matrix.asset_name }}" -Algorithm SHA256).Hash.ToLowerInvariant()
           $h | Out-File -FilePath "${{ matrix.asset_name }}.sha256" -Encoding ascii -NoNewline
 

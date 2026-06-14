@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# wax installer — from a clone: builds with cargo. Otherwise: GitHub Releases binary.
+# oil installer — from a clone: builds with cargo. Otherwise: GitHub Releases binary.
 # Usage:
 #   ./install.sh                         # in a clone → cargo build --release
-#   WAX_USE_RELEASE=1 ./install.sh       # in a clone → still use releases
+#   OIL_USE_RELEASE=1 ./install.sh       # in a clone → still use releases
 #   curl -fsSL …/install.sh | bash       # download latest release
 #
 set -euo pipefail
 
-REPO="semitechnological/wax"
-INSTALL_DIR="${WAX_INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${WAX_VERSION:-}"
+REPO="tschk/oil"
+INSTALL_DIR="${OIL_INSTALL_DIR:-$HOME/.local/bin}"
+VERSION="${OIL_VERSION:-}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
@@ -19,10 +19,10 @@ warn()  { printf "${YELLOW}! %s${NC}\n" "$*" >&2; }
 die()   { printf "${RED}error: %s${NC}\n" "$*" >&2; exit 1; }
 
 path_hint() {
-  if command -v wax &>/dev/null 2>&1; then
+  if command -v oil &>/dev/null 2>&1; then
     return
   fi
-  printf "\n${BOLD}Add wax to your PATH:${NC}\n"
+  printf "\n${BOLD}Add oil to your PATH:${NC}\n"
   case "${SHELL:-}" in
     */fish) printf '  fish_add_path %s\n' "$INSTALL_DIR" ;;
     *)      printf '  echo '\''export PATH="%s:$PATH"'\'' >> ~/.bashrc  # or ~/.zshrc\n' "$INSTALL_DIR" ;;
@@ -32,14 +32,14 @@ path_hint() {
 install_from_repo() {
   local root="$1"
   if ! command -v cargo &>/dev/null; then
-    die "cargo not in PATH — install Rust from https://rustup.rs/ or use WAX_USE_RELEASE=1 to download a binary."
+    die "cargo not in PATH — install Rust from https://rustup.rs/ or use OIL_USE_RELEASE=1 to download a binary."
   fi
-  info "Building wax from local checkout (${root})…"
+  info "Building oil from local checkout (${root})…"
   ( cd "$root" && cargo build --release )
   mkdir -p "$INSTALL_DIR"
-  cp "${root}/target/release/wax" "${INSTALL_DIR}/wax"
-  chmod +x "${INSTALL_DIR}/wax"
-  ok "wax built and installed to ${INSTALL_DIR}/wax"
+  cp "${root}/target/release/oil" "${INSTALL_DIR}/oil"
+  chmod +x "${INSTALL_DIR}/oil"
+  ok "oil built and installed to ${INSTALL_DIR}/oil"
   path_hint
 }
 
@@ -61,7 +61,7 @@ install_from_release() {
     *)                     die "Unsupported architecture: $ARCH" ;;
   esac
 
-  ASSET="wax-${os}-${arch}"
+  ASSET="oil-${os}-${arch}"
 
   if [ -z "$VERSION" ]; then
     info "Fetching latest release version…"
@@ -70,7 +70,7 @@ install_from_release() {
     [ -n "$VERSION" ] || die "Could not determine latest version from GitHub API"
   fi
 
-  info "Installing wax ${VERSION} (${os}/${arch}) from GitHub Releases…"
+  info "Installing oil ${VERSION} (${os}/${arch}) from GitHub Releases…"
 
   BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
   TMP="$(mktemp)"
@@ -107,27 +107,27 @@ install_from_release() {
   expected: $EXPECTED
   actual:   $ACTUAL"
     ok "checksum verified"
-  elif [ "${WAX_NO_VERIFY:-}" = "1" ]; then
-    warn "WAX_NO_VERIFY=1 set — skipping integrity verification"
+  elif [ "${OIL_NO_VERIFY:-}" = "1" ]; then
+    warn "OIL_NO_VERIFY=1 set — skipping integrity verification"
   else
-    die "No checksum file for ${VERSION}; set WAX_NO_VERIFY=1 to install without integrity verification"
+    die "No checksum file for ${VERSION}; set OIL_NO_VERIFY=1 to install without integrity verification"
   fi
 
   chmod +x "$TMP"
 
   mkdir -p "$INSTALL_DIR"
-  mv "$TMP" "${INSTALL_DIR}/wax"
+  mv "$TMP" "${INSTALL_DIR}/oil"
 
-  ok "wax ${VERSION} installed to ${INSTALL_DIR}/wax"
+  ok "oil ${VERSION} installed to ${INSTALL_DIR}/oil"
   path_hint
 }
 
 # ---- repo vs release -------------------------------------------------------
 
 _src="${BASH_SOURCE[0]:-}"
-if [[ -n "$_src" ]] && [[ "$(basename -- "$_src")" == "install.sh" ]] && [[ "${WAX_USE_RELEASE:-}" != "1" ]]; then
+if [[ -n "$_src" ]] && [[ "$(basename -- "$_src")" == "install.sh" ]] && [[ "${OIL_USE_RELEASE:-}" != "1" ]]; then
   _root="$(cd "$(dirname -- "$_src")" && pwd)"
-  if [ -f "${_root}/Cargo.toml" ] && grep -q 'name = "waxpkg"' "${_root}/Cargo.toml"; then
+  if [ -f "${_root}/Cargo.toml" ] && grep -q 'name = "oil"' "${_root}/Cargo.toml"; then
     install_from_repo "$_root"
     exit 0
   fi
