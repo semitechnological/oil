@@ -12,6 +12,54 @@ fn wax() -> Command {
     Command::new(bin)
 }
 
+fn write_windows_manifest(
+    home: &std::path::Path,
+    ecosystem: &str,
+    id: &str,
+    version: &str,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let root = home.join(".local/wax");
+    let staging = root
+        .join(format!("{ecosystem}-apps"))
+        .join(id.replace('.', "_"))
+        .join(version);
+    let bin = root.join("bin").join(format!("{id}.exe"));
+    let manifest = root
+        .join("windows/manifests")
+        .join(format!("{ecosystem}-{id}.json"));
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(manifest.parent().unwrap()).unwrap();
+    let payload = staging.join("payload.exe");
+    std::fs::write(&payload, b"payload").unwrap();
+    std::fs::write(&bin, b"bin").unwrap();
+    let raw = format!(
+        r#"{{
+  "ecosystem": "{}",
+  "id": "{}",
+  "version": "{}",
+  "source": "https://example.invalid/pkg.zip",
+  "staging_dir": "{}",
+  "bin_links": ["{}"],
+  "files": ["{}"],
+  "installed_at": 1
+}}"#,
+        match ecosystem {
+            "scoop" => "Scoop",
+            "winget" => "Winget",
+            "choco" => "Chocolatey",
+            other => other,
+        },
+        id,
+        version,
+        staging.display(),
+        bin.display(),
+        payload.display()
+    );
+    std::fs::write(&manifest, raw).unwrap();
+    (manifest, staging, bin)
+}
+
 // ── basic smoke tests ────────────────────────────────────────────────────────
 
 #[test]
@@ -372,6 +420,57 @@ fn list_plain_no_match_reports_query() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("no installed packages match"), "{stdout}");
     assert!(stdout.contains(needle), "{stdout}");
+}
+
+#[test]
+fn list_plain_shows_windows_manifests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cellar = tmp.path().join("Cellar");
+    std::fs::create_dir_all(&cellar).unwrap();
+    let cache = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    write_windows_manifest(tmp.path(), "scoop", "ripgrep", "14.1.1");
+
+    let out = wax()
+        .env("HOME", tmp.path())
+        .env("WAX_CACHE_DIR", &cache)
+        .env("WAX_TEST_CELLAR", &cellar)
+        .env("CI", "1")
+        .arg("list")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("scoop/ripgrep"), "{stdout}");
+    assert!(stdout.contains("Windows package"), "{stdout}");
+}
+
+#[test]
+fn uninstall_removes_windows_manifest_package() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let (manifest, staging, bin) = write_windows_manifest(tmp.path(), "scoop", "ripgrep", "14.1.1");
+
+    let out = wax()
+        .env("HOME", tmp.path())
+        .env("WAX_CACHE_DIR", &cache)
+        .env("CI", "1")
+        .args(["uninstall", "--yes", "scoop/ripgrep"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!manifest.exists());
+    assert!(!staging.exists());
+    assert!(!bin.exists());
 }
 
 #[test]

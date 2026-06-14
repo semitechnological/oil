@@ -240,7 +240,7 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
         WaxError::InstallError("winget manifest missing NestedInstallerFiles".into())
     })?;
 
-    let mut bin_links = Vec::new();
+    let mut copy_actions = Vec::new();
     for nf in nested_files {
         let rel = PathBuf::from(nf.relative_file_path.replace('\\', "/"));
         let src = join_under_root(&extract_root, &rel)?;
@@ -260,11 +260,16 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
                     .unwrap_or_else(|| "app.exe".into())
             });
         let dest = bin_dir.join(dest_name);
+        copy_actions.push((src, dest));
+    }
+    let bin_links: Vec<PathBuf> = copy_actions.iter().map(|(_, dest)| dest.clone()).collect();
+    windows_state::validate_bin_links_available(Ecosystem::Winget, package_id, &bin_links)?;
+
+    for (src, dest) in copy_actions {
         if dest.exists() {
             let _ = std::fs::remove_file(&dest);
         }
         std::fs::copy(&src, &dest)?;
-        bin_links.push(dest);
     }
 
     let staging = windows_state::wax_windows_root()?

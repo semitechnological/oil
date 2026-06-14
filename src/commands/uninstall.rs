@@ -7,6 +7,7 @@ use crate::lockfile::Lockfile;
 use crate::signal::{clear_current_op, set_current_op};
 use crate::ui::dirs;
 use crate::ui::SPINNER_TICK_CHARS;
+use crate::windows_state::{self, WindowsPackageManifest};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Confirm;
@@ -26,6 +27,11 @@ pub async fn uninstall(
         state.sync_from_cellar().await.ok();
         let installed = state.load().await?;
         let mut names: Vec<String> = installed.keys().cloned().collect();
+        names.extend(
+            windows_state::list_manifests()?
+                .into_iter()
+                .map(|m| format!("{}/{}", m.ecosystem.label(), m.id)),
+        );
         names.sort();
         names
     } else {
@@ -101,13 +107,20 @@ async fn uninstall_impl(
             return uninstall_cask(cache, formula_name, dry_run, start, quiet).await;
         }
 
+        if let Some(manifest) = windows_state::find_manifest(formula_name)? {
+            return uninstall_windows_package(&manifest, dry_run, start, quiet, prefix).await;
+        }
+
         state.sync_from_cellar().await?;
         let updated_packages = state.load().await?;
 
-        updated_packages
-            .get(formula_name)
-            .cloned()
-            .ok_or_else(|| WaxError::NotInstalled(formula_name.to_string()))?
+        if let Some(package) = updated_packages.get(formula_name).cloned() {
+            package
+        } else if let Some(manifest) = windows_state::find_manifest(formula_name)? {
+            return uninstall_windows_package(&manifest, dry_run, start, quiet, prefix).await;
+        } else {
+            return Err(WaxError::NotInstalled(formula_name.to_string()));
+        }
     };
 
     let formulae = cache.load_formulae().await?;
@@ -147,6 +160,42 @@ async fn uninstall_impl(
     }
 
     uninstall_package_direct(formula_name, &package, state, dry_run, start, quiet, prefix).await
+}
+
+async fn uninstall_windows_package(
+    manifest: &WindowsPackageManifest,
+    dry_run: bool,
+    start: std::time::Instant,
+    quiet: bool,
+    prefix: &str,
+) -> Result<()> {
+    let qualified = format!("{}/{}", manifest.ecosystem.label(), manifest.id);
+    if dry_run {
+        if !quiet {
+            println!(
+                "{}would remove {}@{} (windows)",
+                prefix,
+                style(&qualified).magenta(),
+                style(&manifest.version).dim()
+            );
+        }
+        return Ok(());
+    }
+
+    set_current_op(format!("removing {}", qualified));
+    windows_state::remove_manifest(manifest, false)?;
+
+    if !quiet {
+        println!(
+            "{} {}{}{}",
+            style("✗").red().bold(),
+            style(&qualified).magenta(),
+            style(format!("@{} (windows)", manifest.version)).dim(),
+            style(crate::timing::elapsed_suffix(start.elapsed())).dim(),
+        );
+    }
+
+    Ok(())
 }
 
 async fn uninstall_package_direct(

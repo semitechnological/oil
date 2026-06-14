@@ -378,7 +378,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
     let bin_dir = windows_state::wax_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
-    let mut bin_links = Vec::new();
+    let mut copy_actions = Vec::new();
     for rel in &resolved.bin_paths {
         let src = join_under_root(&version_dir, rel)?;
         if !src.exists() {
@@ -391,11 +391,16 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
             .file_name()
             .ok_or_else(|| WaxError::InstallError("Invalid bin path".into()))?;
         let dest = bin_dir.join(file_name);
+        copy_actions.push((src, dest));
+    }
+    let bin_links: Vec<PathBuf> = copy_actions.iter().map(|(_, dest)| dest.clone()).collect();
+    windows_state::validate_bin_links_available(Ecosystem::Scoop, package, &bin_links)?;
+
+    for (src, dest) in copy_actions {
         if dest.exists() {
             std::fs::remove_file(&dest)?;
         }
         std::fs::copy(&src, &dest)?;
-        bin_links.push(dest);
     }
 
     let mut files = windows_state::collect_files(&version_dir)?;

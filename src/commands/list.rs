@@ -4,6 +4,7 @@ use crate::cask::CaskState;
 use crate::commands::upgrade::{get_outdated_packages, upgrade as run_upgrade};
 use crate::error::{Result, WaxError};
 use crate::install::InstallState;
+use crate::windows_state;
 use console::style;
 use inquire::{Confirm, Select};
 use std::collections::HashMap;
@@ -20,6 +21,7 @@ struct InstalledRow {
     name: String,
     line: String,
     is_cask: bool,
+    is_windows: bool,
 }
 
 impl std::fmt::Display for InstalledRow {
@@ -126,6 +128,7 @@ async fn collect_installed_rows(_cache: &Cache) -> Result<Vec<InstalledRow>> {
                     name: package_name,
                     line,
                     is_cask: false,
+                    is_windows: false,
                 });
             }
         }
@@ -145,6 +148,22 @@ async fn collect_installed_rows(_cache: &Cache) -> Result<Vec<InstalledRow>> {
             name: cask_name.clone(),
             line,
             is_cask: true,
+            is_windows: false,
+        });
+    }
+
+    for manifest in windows_state::list_manifests()? {
+        let line = format!(
+            "{} {} {}",
+            style(format!("{}/{}", manifest.ecosystem.label(), manifest.id)).magenta(),
+            style(&manifest.version).dim(),
+            style("(windows)").yellow()
+        );
+        rows.push(InstalledRow {
+            name: manifest.id,
+            line,
+            is_cask: false,
+            is_windows: true,
         });
     }
 
@@ -170,13 +189,14 @@ fn print_table(rows: &[InstalledRow]) {
     }
 }
 
-fn summarize_counts(rows: &[InstalledRow]) -> (usize, usize) {
-    let fc = rows.iter().filter(|r| !r.is_cask).count();
+fn summarize_counts(rows: &[InstalledRow]) -> (usize, usize, usize) {
+    let fc = rows.iter().filter(|r| !r.is_cask && !r.is_windows).count();
     let cc = rows.iter().filter(|r| r.is_cask).count();
-    (fc, cc)
+    let wc = rows.iter().filter(|r| r.is_windows).count();
+    (fc, cc, wc)
 }
 
-fn print_summary(total: usize, formula_count: usize, cask_count: usize) {
+fn print_summary(total: usize, formula_count: usize, cask_count: usize, windows_count: usize) {
     let parts: Vec<String> = [
         if formula_count == 0 {
             None
@@ -198,6 +218,19 @@ fn print_summary(total: usize, formula_count: usize, cask_count: usize) {
                 "{} {}",
                 cask_count,
                 if cask_count == 1 { "cask" } else { "casks" }
+            ))
+        },
+        if windows_count == 0 {
+            None
+        } else {
+            Some(format!(
+                "{} {}",
+                windows_count,
+                if windows_count == 1 {
+                    "Windows package"
+                } else {
+                    "Windows packages"
+                }
             ))
         },
     ]
@@ -383,8 +416,8 @@ pub async fn list(cache: &Cache, query: Option<String>, upgradable: bool) -> Res
     }
 
     print_table(&filtered);
-    let (fc, cc) = summarize_counts(&filtered);
-    print_summary(filtered.len(), fc, cc);
+    let (fc, cc, wc) = summarize_counts(&filtered);
+    print_summary(filtered.len(), fc, cc, wc);
 
     Ok(())
 }
@@ -399,6 +432,7 @@ mod tests {
             name: name.to_string(),
             line: line.to_string(),
             is_cask: false,
+            is_windows: false,
         }
     }
 

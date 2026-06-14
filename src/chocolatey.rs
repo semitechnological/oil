@@ -107,7 +107,7 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
 
     if exes.is_empty() {
         return Err(WaxError::InstallError(
-            "No suitable portable .exe under tools/ (this package likely needs choco.exe + PowerShell)"
+            "No suitable portable .exe under tools/ (this package likely depends on unsupported installer script semantics)"
                 .into(),
         ));
     }
@@ -123,17 +123,22 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     }
     scoop::copy_dir_all(&tools_dir, &staging)?;
 
-    let mut bin_links = Vec::new();
+    let mut copy_actions = Vec::new();
     for src in &exes {
         let file_name = src
             .file_name()
             .ok_or_else(|| WaxError::InstallError("invalid exe path".into()))?;
         let dest = bin_dir.join(file_name);
+        copy_actions.push((src.clone(), dest));
+    }
+    let bin_links: Vec<PathBuf> = copy_actions.iter().map(|(_, dest)| dest.clone()).collect();
+    windows_state::validate_bin_links_available(Ecosystem::Chocolatey, id, &bin_links)?;
+
+    for (src, dest) in copy_actions {
         if dest.exists() {
             let _ = std::fs::remove_file(&dest);
         }
         std::fs::copy(src, &dest)?;
-        bin_links.push(dest);
     }
 
     let mut files = windows_state::collect_files(&staging)?;
