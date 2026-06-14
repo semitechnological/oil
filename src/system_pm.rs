@@ -4,7 +4,7 @@
 //! package managers. This module may detect available tools and query installed
 //! inventory, but mutating host-PM operations intentionally return unsupported.
 
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 
 use std::path::Path;
 use tokio::process::Command;
@@ -49,52 +49,108 @@ impl SystemPm {
         }
     }
 
-    /// Detect the most appropriate system package manager on the current host.
+    /// Detect the appropriate package manager for this distro.
+    /// Reads os-release first, falls back to binary detection.
     pub async fn detect() -> Option<Self> {
         if cfg!(target_os = "macos") {
-            None
-        } else {
-            let candidates: &[(&str, Self)] = &[
+            return None;
+        }
+
+        // Try os-release based distro matching first
+        let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+        let distro_id = Self::parse_os_release_field(&os_release, "ID");
+        let distro_like = Self::parse_os_release_field(&os_release, "ID_LIKE");
+
+        let matched = Self::match_distro(&distro_id, &distro_like);
+        if let Some(pm) = matched {
+            debug!("Detected distro: {} ({}), using {}", distro_id, distro_like, pm.name());
+            return Some(pm);
+        }
+
+        // Fallback: binary detection (works in containers, chroots)
+        let candidates: &[(&str, Self)] = &[
+                #[cfg(any(feature = "system-apt", feature = "system-all"))]
                 ("apt-get", Self::Apt),
+                #[cfg(any(feature = "system-dnf", feature = "system-all"))]
                 ("dnf", Self::Dnf),
+                #[cfg(any(feature = "system-pacman", feature = "system-all"))]
                 ("pacman", Self::Pacman),
+                #[cfg(any(feature = "system-apk", feature = "system-all"))]
                 ("apk", Self::Apk),
                 ("zypper", Self::Zypper),
                 ("emerge", Self::Emerge),
+                #[cfg(any(feature = "system-dnf", feature = "system-all"))]
                 ("yum", Self::Yum),
+                #[cfg(any(feature = "system-xbps", feature = "system-all"))]
                 ("xbps-install", Self::Xbps),
                 ("nix-env", Self::Nix),
+                #[cfg(any(feature = "system-nix", feature = "system-all"))]
+                ("nix", Self::Nix),
             ];
 
             for (bin, pm) in candidates {
                 if which(bin).await {
-                    debug!("Detected system package manager: {}", bin);
+                    debug!("Detected package manager binary: {}", bin);
                     return Some(pm.clone());
                 }
             }
-            None
+
+        None
+    }
+
+    /// Match a distro ID/ID_LIKE to a package manager.
+    fn match_distro(id: &str, id_like: &str) -> Option<Self> {
+        let all = format!("{} {}", id, id_like).to_lowercase();
+        #[cfg(any(feature = "system-apt", feature = "system-all"))]
+        if all.contains("debian") || all.contains("ubuntu") || all.contains("mint") {
+            return Some(Self::Apt);
         }
+        #[cfg(any(feature = "system-dnf", feature = "system-all"))]
+        if all.contains("fedora") || all.contains("rhel") || all.contains("centos") {
+            return Some(Self::Dnf);
+        }
+        #[cfg(any(feature = "system-pacman", feature = "system-all"))]
+        if all.contains("arch") || all.contains("manjaro") {
+            return Some(Self::Pacman);
+        }
+        #[cfg(any(feature = "system-apk", feature = "system-all"))]
+        if all.contains("alpine") || all.contains("chimera") {
+            return Some(Self::Apk);
+        }
+        #[cfg(any(feature = "system-xbps", feature = "system-all"))]
+        #[cfg(any(feature = "system-nix", feature = "system-all"))]
+        if all.contains("nixos") {
+            return Some(Self::Nix);
+        }
+        if all.contains("void") {
+            return Some(Self::Xbps);
+        }
+        None
     }
 
-    /// Host package-manager upgrades are intentionally disabled. Wax system
-    /// packages should be upgraded by Wax once registry-backed upgrades are
-    /// implemented, not by delegating to `apt upgrade`, `dnf upgrade`, etc.
-    #[expect(dead_code, reason = "mutating host-PM operations are disabled")]
+    fn parse_os_release_field(os_release: &str, field: &str) -> String {
+        os_release.lines().find_map(|line| {
+            let prefix = format!("{}={}", field, "\"");
+            if let Some(val) = line.strip_prefix(&prefix) {
+                Some(val.trim_end_matches('"').to_string())
+            } else {
+                let prefix = format!("{}={}", field, "");
+                line.strip_prefix(&prefix).map(|v| v.trim().to_string())
+            }
+        }).unwrap_or_default()
+    }
+
+    /// Oil never delegates to host package managers.
     pub async fn upgrade_all(&self) -> Result<()> {
-        Err(WaxError::PlatformNotSupported(format!(
-            "wax does not delegate system upgrades to {}; registry-backed wax upgrades are not implemented yet",
-            self.name()
-        )))
+        Err(OilError::PlatformNotSupported(
+            "not supported: use `oil upgrade`".into()
+        ))
     }
 
-    /// Host package-manager installs are intentionally disabled. Wax system
-    /// installs must use Wax's registry/download/extract/manifest pipeline.
-    #[expect(dead_code, reason = "mutating host-PM operations are disabled")]
     pub async fn install(&self, _packages: &[String]) -> Result<()> {
-        Err(WaxError::PlatformNotSupported(format!(
-            "wax does not delegate system installs to {}; use the wax-managed system installer",
-            self.name()
-        )))
+        Err(OilError::PlatformNotSupported(
+            "not supported: use `oil install`".into()
+        ))
     }
 
     /// List packages currently installed by this package manager.
@@ -142,8 +198,8 @@ impl SystemPm {
 
     #[expect(dead_code, reason = "mutating host-PM operations are disabled")]
     pub async fn remove(&self, _packages: &[String]) -> Result<()> {
-        Err(WaxError::PlatformNotSupported(format!(
-            "wax does not delegate system removals to {}; wax removes files from its own manifests",
+        Err(OilError::PlatformNotSupported(format!(
+            "oil does not delegate system removals to {}; wax removes files from its own manifests",
             self.name()
         )))
     }
@@ -152,8 +208,8 @@ impl SystemPm {
     /// hand casks off to snap/flatpak/native package managers because that
     /// breaks the Wax-owned install/state/manifest model.
     pub async fn install_cask(&self, cask_name: &str) -> Result<()> {
-        Err(WaxError::PlatformNotSupported(format!(
-            "Linux cask install for '{}' is disabled: wax does not delegate installs to other package managers",
+        Err(OilError::PlatformNotSupported(format!(
+            "Linux cask install for '{}' is disabled: oil does not delegate installs to other package managers",
             cask_name
         )))
     }
@@ -197,10 +253,10 @@ async fn run_capture(program: &str, args: &[&str]) -> Result<String> {
         .args(args)
         .output()
         .await
-        .map_err(|e| WaxError::InstallError(format!("Failed to run {}: {}", program, e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to run {}: {}", program, e)))?;
 
     if !output.status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "{} exited with status {}",
             program,
             output.status.code().unwrap_or(-1)

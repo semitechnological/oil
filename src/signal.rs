@@ -2,7 +2,7 @@ use indicatif::MultiProgress;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 static CRITICAL_SECTION: AtomicBool = AtomicBool::new(false);
@@ -106,7 +106,7 @@ pub fn is_shutdown_requested() -> bool {
 
 pub fn check_cancelled() -> Result<()> {
     if is_shutdown_requested() && !is_in_critical_section() {
-        Err(WaxError::Interrupted)
+        Err(OilError::Interrupted)
     } else {
         Ok(())
     }

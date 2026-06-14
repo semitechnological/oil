@@ -2,7 +2,7 @@ use crate::bottle::{detect_platform, BottleDownloader};
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::discovery::{discover_linux_system_packages, discover_manually_installed_casks};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{create_symlinks, InstallMode, InstallState, InstalledPackage};
 use crate::lockfile::Lockfile;
 use crate::signal::{check_cancelled, CriticalSection};
@@ -195,10 +195,10 @@ pub async fn sync(cache: &Cache) -> Result<()> {
             let formula = formulae
                 .iter()
                 .find(|f| f.name == name)
-                .ok_or_else(|| WaxError::FormulaNotFound(name.clone()))?;
+                .ok_or_else(|| OilError::FormulaNotFound(name.clone()))?;
 
             if formula.versions.stable != lock_pkg.version {
-                return Err(WaxError::LockfileError(format!(
+                return Err(OilError::LockfileError(format!(
                     "Package {} version mismatch: lockfile specifies {} but latest available is {}. The locked version may no longer be available.",
                     name, lock_pkg.version, formula.versions.stable
                 )));
@@ -216,13 +216,13 @@ pub async fn sync(cache: &Cache) -> Result<()> {
                 .as_ref()
                 .and_then(|b| b.stable.as_ref())
                 .ok_or_else(|| {
-                    WaxError::BottleNotAvailable(format!("{} (no bottle info)", name))
+                    OilError::BottleNotAvailable(format!("{} (no bottle info)", name))
                 })?;
 
             let bottle_file = bottle_info
                 .file_for_platform(&lock_pkg.bottle)
                 .ok_or_else(|| {
-                    WaxError::BottleNotAvailable(format!(
+                    OilError::BottleNotAvailable(format!(
                         "{} for platform {}",
                         name, lock_pkg.bottle
                     ))
@@ -292,7 +292,7 @@ pub async fn sync(cache: &Cache) -> Result<()> {
                 let extract_dir = temp_dir.path().join(&entry.name);
                 BottleDownloader::extract(&tarball_path, &extract_dir)?;
 
-                Ok::<_, WaxError>((entry.name, entry.version, entry.platform, extract_dir))
+                Ok::<_, OilError>((entry.name, entry.version, entry.platform, extract_dir))
             });
 
             tasks.push(task);
@@ -306,7 +306,7 @@ pub async fn sync(cache: &Cache) -> Result<()> {
                 Ok(Ok(data)) => extracted_packages.push(data),
                 Ok(Err(e)) => return Err(e),
                 Err(e) => {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Download task failed: {}",
                         e
                     )))

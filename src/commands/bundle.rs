@@ -1,5 +1,5 @@
 use crate::cache::Cache;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use console::style;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use tokio::process::Command;
 use tracing::instrument;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Waxfile {
+pub struct Oilfile {
     #[serde(default)]
     pub tap: Vec<String>,
     #[serde(default)]
@@ -57,22 +57,22 @@ impl BundleEntry {
 }
 
 fn find_waxfile() -> Result<PathBuf> {
-    let candidates = ["Waxfile", "Waxfile.toml", "waxfile", "waxfile.toml"];
+    let candidates = ["Oilfile", "Oilfile.toml", "waxfile", "waxfile.toml"];
     for name in &candidates {
         let path = PathBuf::from(name);
         if path.exists() {
             return Ok(path);
         }
     }
-    Err(WaxError::BundleError(
-        "No Waxfile found. Create a Waxfile.toml in your project root.".to_string(),
+    Err(OilError::BundleError(
+        "No Oilfile found. Create a Oilfile.toml in your project root.".to_string(),
     ))
 }
 
-pub fn parse_waxfile(path: &Path) -> Result<Waxfile> {
+pub fn parse_waxfile(path: &Path) -> Result<Oilfile> {
     let content = std::fs::read_to_string(path)
-        .map_err(|e| WaxError::BundleError(format!("Cannot read {}: {}", path.display(), e)))?;
-    let waxfile: Waxfile = toml::from_str(&content)?;
+        .map_err(|e| OilError::BundleError(format!("Cannot read {}: {}", path.display(), e)))?;
+    let waxfile: Oilfile = toml::from_str(&content)?;
     Ok(waxfile)
 }
 
@@ -101,7 +101,7 @@ pub async fn bundle(cache: &Cache, waxfile_path: Option<&str>, dry_run: bool) ->
     let total = tap_count + brew_count + cask_count + cargo_count + uv_count;
 
     if total == 0 {
-        println!("  {} Waxfile is empty", style("!").yellow());
+        println!("  {} Oilfile is empty", style("!").yellow());
         return Ok(());
     }
 
@@ -304,7 +304,7 @@ pub async fn bundle_dump(_cache: &Cache) -> Result<()> {
     Ok(())
 }
 
-fn print_dry_run(waxfile: &Waxfile) {
+fn print_dry_run(waxfile: &Oilfile) {
     println!();
     for tap in &waxfile.tap {
         println!("  tap {}", style(tap).magenta());
@@ -337,7 +337,7 @@ async fn add_tap(tap: &str) -> Result<bool> {
 
     let tap_parts: Vec<&str> = tap.split('/').collect();
     if tap_parts.len() < 2 {
-        return Err(WaxError::BundleError(format!(
+        return Err(OilError::BundleError(format!(
             "Invalid tap format: {}",
             tap
         )));
@@ -382,10 +382,10 @@ async fn cargo_install(entry: &BundleEntry) -> Result<()> {
     let status = cmd
         .status()
         .await
-        .map_err(|e| WaxError::BundleError(format!("cargo not found: {}", e)))?;
+        .map_err(|e| OilError::BundleError(format!("cargo not found: {}", e)))?;
 
     if !status.success() {
-        return Err(WaxError::BundleError(format!(
+        return Err(OilError::BundleError(format!(
             "cargo install {} failed with exit code {}",
             name,
             status.code().unwrap_or(-1)
@@ -426,10 +426,10 @@ async fn uv_tool_install(entry: &BundleEntry) -> Result<()> {
     let status = cmd
         .status()
         .await
-        .map_err(|e| WaxError::BundleError(format!("uv not found: {}", e)))?;
+        .map_err(|e| OilError::BundleError(format!("uv not found: {}", e)))?;
 
     if !status.success() {
-        return Err(WaxError::BundleError(format!(
+        return Err(OilError::BundleError(format!(
             "uv tool install {} failed with exit code {}",
             name,
             status.code().unwrap_or(-1)

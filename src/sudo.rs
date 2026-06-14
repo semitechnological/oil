@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::signal;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
@@ -10,12 +10,12 @@ use tracing::debug;
 static SUDO_VALIDATED: AtomicBool = AtomicBool::new(false);
 static IS_ROOT: OnceLock<bool> = OnceLock::new();
 
-pub fn is_permission_error(err: &WaxError) -> bool {
+pub fn is_permission_error(err: &OilError) -> bool {
     match err {
-        WaxError::IoError(io_err) => {
+        OilError::IoError(io_err) => {
             matches!(io_err.kind(), std::io::ErrorKind::PermissionDenied)
         }
-        WaxError::InstallError(msg) => {
+        OilError::InstallError(msg) => {
             let msg = msg.to_lowercase();
             msg.contains("permission denied") || msg.contains("os error 13")
         }
@@ -23,12 +23,12 @@ pub fn is_permission_error(err: &WaxError) -> bool {
     }
 }
 
-pub fn is_file_exists_error(err: &WaxError) -> bool {
+pub fn is_file_exists_error(err: &OilError) -> bool {
     match err {
-        WaxError::IoError(io_err) => {
+        OilError::IoError(io_err) => {
             matches!(io_err.kind(), std::io::ErrorKind::AlreadyExists)
         }
-        WaxError::InstallError(msg) => {
+        OilError::InstallError(msg) => {
             let msg = msg.to_lowercase();
             msg.contains("file exists") || msg.contains("os error 17")
         }
@@ -69,7 +69,7 @@ pub fn has_sudo_cached() -> bool {
 }
 
 fn sudo_password_prompt() -> String {
-    "[wax] Password for %p: ".to_string()
+    "[oil] Password for %p: ".to_string()
 }
 
 fn interactive_terminal_available() -> bool {
@@ -89,9 +89,9 @@ pub fn acquire_sudo_for(reason: Option<&str>) -> Result<()> {
     }
 
     if !interactive_terminal_available() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Administrator privileges are required but no interactive terminal is available. \
-             Use `wax install --user` for a user-local install, or run from a terminal."
+             Use `oil install --user` for a user-local install, or run from a terminal."
                 .to_string(),
         ));
     }
@@ -108,7 +108,7 @@ pub fn acquire_sudo_for(reason: Option<&str>) -> Result<()> {
         cmd.args(["-v", "-p", &sudo_password_prompt()]);
 
         if let Ok(tty) = std::fs::File::open("/dev/tty") {
-            cmd.stdin(Stdio::from(tty.try_clone().map_err(WaxError::IoError)?))
+            cmd.stdin(Stdio::from(tty.try_clone().map_err(OilError::IoError)?))
                 .stderr(Stdio::from(tty));
         } else {
             cmd.stdin(Stdio::inherit())
@@ -118,10 +118,10 @@ pub fn acquire_sudo_for(reason: Option<&str>) -> Result<()> {
 
         let status = cmd
             .status()
-            .map_err(|e| WaxError::InstallError(format!("failed to run sudo: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("failed to run sudo: {}", e)))?;
 
         if !status.success() {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "sudo authentication failed or was cancelled".to_string(),
             ));
         }
@@ -150,10 +150,10 @@ pub fn sudo_remove(path: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .status()
-        .map_err(WaxError::IoError)?;
+        .map_err(OilError::IoError)?;
 
     if !status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "sudo rm -rf {} failed",
             path.display()
         )));
@@ -173,10 +173,10 @@ pub fn sudo_copy(src: &Path, dst: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .status()
-        .map_err(WaxError::IoError)?;
+        .map_err(OilError::IoError)?;
 
     if !status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "sudo cp -Rf {} {} failed",
             src.display(),
             dst.display()
@@ -195,10 +195,10 @@ pub fn sudo_mkdir(path: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .status()
-        .map_err(WaxError::IoError)?;
+        .map_err(OilError::IoError)?;
 
     if !status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "sudo mkdir -p {} failed",
             path.display()
         )));
@@ -226,10 +226,10 @@ pub fn sudo_symlink(src: &Path, dst: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .status()
-        .map_err(WaxError::IoError)?;
+        .map_err(OilError::IoError)?;
 
     if !status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "sudo ln -sf {} {} failed",
             src.display(),
             dst.display()
@@ -261,7 +261,7 @@ pub fn sudo_chown_recursive(path: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map_err(WaxError::IoError)?;
+        .map_err(OilError::IoError)?;
 
     if !status.success() {
         debug!("sudo chown failed for {:?}, continuing", path);
@@ -276,7 +276,7 @@ mod tests {
     #[test]
     fn sudo_password_prompt_is_wax_branded() {
         let prompt = sudo_password_prompt();
-        assert!(prompt.contains("wax"));
+        assert!(prompt.contains("oil"));
         assert!(prompt.contains("%p"));
     }
 }

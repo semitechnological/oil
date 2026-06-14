@@ -2,7 +2,7 @@
 //! Uses the public GitHub API / raw.githubusercontent.com — no winget.exe.
 
 use crate::bottle::BottleDownloader;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::package_spec::Ecosystem;
 use crate::scoop;
 use crate::version;
@@ -29,7 +29,7 @@ struct GhContentEntry {
 fn package_id_to_content_path(id: &str) -> Result<String> {
     let parts: Vec<&str> = id.split('.').filter(|s| !s.is_empty()).collect();
     if parts.len() < 2 {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "winget PackageIdentifier needs at least two dot-separated segments (e.g. JesseDuffield.lazygit)"
                 .into(),
         ));
@@ -37,7 +37,7 @@ fn package_id_to_content_path(id: &str) -> Result<String> {
     let first = parts[0]
         .chars()
         .next()
-        .ok_or_else(|| WaxError::InvalidInput("empty winget id".into()))?
+        .ok_or_else(|| OilError::InvalidInput("empty winget id".into()))?
         .to_ascii_lowercase();
     Ok(format!("manifests/{}/{}", first, parts.join("/")))
 }
@@ -46,19 +46,19 @@ fn github_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .user_agent(concat!(
-            "wax/",
+            "oil/",
             env!("CARGO_PKG_VERSION"),
             " (winget-resolve)"
         ))
         .build()
-        .map_err(|e| WaxError::InstallError(e.to_string()))
+        .map_err(|e| OilError::InstallError(e.to_string()))
 }
 
 async fn gh_get_json(url: &str) -> Result<Vec<GhContentEntry>> {
     let client = github_client()?;
     let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "GitHub API {} -> HTTP {}",
             url,
             resp.status()
@@ -66,9 +66,9 @@ async fn gh_get_json(url: &str) -> Result<Vec<GhContentEntry>> {
     }
     let v: serde_json::Value = resp.json().await?;
     if v.is_array() {
-        Ok(serde_json::from_value(v).map_err(WaxError::JsonError)?)
+        Ok(serde_json::from_value(v).map_err(OilError::JsonError)?)
     } else {
-        Err(WaxError::InstallError(
+        Err(OilError::InstallError(
             "Unexpected GitHub API response (expected directory listing)".into(),
         ))
     }
@@ -101,7 +101,7 @@ fn join_under_root(root: &Path, rel: &Path) -> Result<PathBuf> {
         match component {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Unsafe path in winget manifest: {}",
                     rel.display()
                 )));
@@ -163,7 +163,7 @@ fn pick_installer(doc: &WingetInstallerDoc) -> Result<&WingetInstallerEntry> {
         .iter()
         .find(|i| i.architecture.eq_ignore_ascii_case(want))
         .or_else(|| doc.installers.first())
-        .ok_or_else(|| WaxError::InstallError("winget manifest has no installers".into()))
+        .ok_or_else(|| OilError::InstallError("winget manifest has no installers".into()))
 }
 
 fn installer_type_for<'a>(doc: &'a WingetInstallerDoc, inst: &'a WingetInstallerEntry) -> &'a str {
@@ -246,7 +246,7 @@ fn exe_install_args(switches: &WingetInstallerSwitches) -> Result<Vec<String>> {
         .as_deref()
         .or(switches.silent_with_progress.as_deref())
         .ok_or_else(|| {
-            WaxError::InstallError("winget exe installer is missing silent install switches".into())
+            OilError::InstallError("winget exe installer is missing silent install switches".into())
         })?;
     let mut args = split_switches(raw);
     if let Some(custom) = &switches.custom {
@@ -266,7 +266,7 @@ fn exe_uninstall(doc: &WingetInstallerDoc) -> Result<WindowsNativeUninstall> {
         .iter()
         .find_map(|entry| entry.silent_uninstall_string.as_deref())
         .ok_or_else(|| {
-            WaxError::InstallError(
+            OilError::InstallError(
                 "winget exe installer is missing silent uninstall metadata".into(),
             )
         })?;
@@ -274,7 +274,7 @@ fn exe_uninstall(doc: &WingetInstallerDoc) -> Result<WindowsNativeUninstall> {
     let command = parts
         .drain(..1)
         .next()
-        .ok_or_else(|| WaxError::InstallError("empty silent uninstall metadata".into()))?;
+        .ok_or_else(|| OilError::InstallError("empty silent uninstall metadata".into()))?;
     Ok(WindowsNativeUninstall {
         command,
         args: parts,
@@ -308,7 +308,7 @@ fn native_plan(
     match inst_type.as_str() {
         "msi" | "wix" => {
             let product_code = product_code_for(doc, inst).ok_or_else(|| {
-                WaxError::InstallError(
+                OilError::InstallError(
                     "winget msi installer is missing ProductCode for managed uninstall".into(),
                 )
             })?;
@@ -320,7 +320,7 @@ fn native_plan(
         }
         "msix" | "appx" => {
             let family = package_family_name_for(doc).ok_or_else(|| {
-                WaxError::InstallError(
+                OilError::InstallError(
                     "winget msix installer is missing PackageFamilyName for managed uninstall"
                         .into(),
                 )
@@ -333,7 +333,7 @@ fn native_plan(
         }
         "exe" | "inno" | "nullsoft" | "burn" => {
             let switches = installer_switches_for(doc, inst).ok_or_else(|| {
-                WaxError::InstallError("winget exe installer is missing InstallerSwitches".into())
+                OilError::InstallError("winget exe installer is missing InstallerSwitches".into())
             })?;
             Ok((
                 installer_path.to_string_lossy().to_string(),
@@ -341,15 +341,15 @@ fn native_plan(
                 exe_uninstall(doc)?,
             ))
         }
-        _ => Err(WaxError::InstallError(format!(
-            "wax does not support native winget InstallerType={inst_type}"
+        _ => Err(OilError::InstallError(format!(
+            "oil does not support native winget InstallerType={inst_type}"
         ))),
     }
 }
 
 fn run_native_command(command: &str, args: &[String]) -> Result<()> {
     if !cfg!(target_os = "windows") {
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "native Windows installer execution is only supported on Windows".into(),
         ));
     }
@@ -357,7 +357,7 @@ fn run_native_command(command: &str, args: &[String]) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "native installer command failed with {status}: {command}"
         )))
     }
@@ -365,7 +365,7 @@ fn run_native_command(command: &str, args: &[String]) -> Result<()> {
 
 pub async fn install_winget_package(package_id: &str) -> Result<()> {
     if !cfg!(target_os = "windows") {
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "winget install is only supported on Windows".into(),
         ));
     }
@@ -380,14 +380,14 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
         .map(|e| e.name.clone())
         .collect();
     if versions.is_empty() {
-        return Err(WaxError::FormulaNotFound(format!(
+        return Err(OilError::FormulaNotFound(format!(
             "no version folders under winget-pkgs/{rel}"
         )));
     }
     version::sort_versions(&mut versions);
     let latest = versions
         .last()
-        .ok_or_else(|| WaxError::InstallError("no winget versions".into()))?
+        .ok_or_else(|| OilError::InstallError("no winget versions".into()))?
         .clone();
 
     let ver_url = format!("{WINGET_PKGS_REPO_CONTENTS}/{rel}/{latest}?ref=master");
@@ -396,8 +396,8 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
         .iter()
         .find(|e| e.name.ends_with(".installer.yaml") && e.entry_type == "file")
         .ok_or_else(|| {
-            WaxError::InstallError(
-                "No .installer.yaml in latest winget version (wax only supports installer manifests)"
+            OilError::InstallError(
+                "No .installer.yaml in latest winget version (oil only supports installer manifests)"
                     .into(),
             )
         })?;
@@ -414,7 +414,7 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
         .await?;
 
     let doc: WingetInstallerDoc =
-        serde_yaml::from_str(&yaml_text).map_err(|e| WaxError::ParseError(e.to_string()))?;
+        serde_yaml::from_str(&yaml_text).map_err(|e| OilError::ParseError(e.to_string()))?;
 
     let inst = pick_installer(&doc)?;
     let inst_type = installer_type_for(&doc, inst);
@@ -455,11 +455,11 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
     std::fs::create_dir_all(&extract_root)?;
     scoop::extract_zip_file(&archive_path, &extract_root)?;
 
-    let bin_dir = windows_state::wax_bin_dir()?;
+    let bin_dir = windows_state::oil_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
     let nested_files = doc.nested_installer_files.as_ref().ok_or_else(|| {
-        WaxError::InstallError("winget manifest missing NestedInstallerFiles".into())
+        OilError::InstallError("winget manifest missing NestedInstallerFiles".into())
     })?;
 
     let mut copy_actions = Vec::new();
@@ -467,7 +467,7 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
         let rel = PathBuf::from(nf.relative_file_path.replace('\\', "/"));
         let src = join_under_root(&extract_root, &rel)?;
         if !src.exists() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "nested portable file missing: {}",
                 src.display()
             )));
@@ -494,7 +494,7 @@ pub async fn install_winget_package(package_id: &str) -> Result<()> {
         std::fs::copy(&src, &dest)?;
     }
 
-    let staging = windows_state::wax_windows_root()?
+    let staging = windows_state::oil_windows_root()?
         .join("winget-apps")
         .join(package_id.replace('.', "_"))
         .join(&latest);
@@ -534,7 +534,7 @@ async fn install_native_winget_package(
     inst: &WingetInstallerEntry,
     installer_path: &Path,
 ) -> Result<()> {
-    let staging = windows_state::wax_windows_root()?
+    let staging = windows_state::oil_windows_root()?
         .join("winget-installers")
         .join(package_id.replace('.', "_"))
         .join(latest);

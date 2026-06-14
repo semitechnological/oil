@@ -1,5 +1,5 @@
 use super::{PackageIndex, PackageMetadata};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use flate2::read::GzDecoder;
 use quick_xml::escape::unescape;
 use quick_xml::events::Event;
@@ -32,13 +32,13 @@ impl DnfRegistry {
         if rpm_family_from_os_release(&os_release).as_deref() == Some("fedora") {
             return Ok(Self::fedora_default());
         }
-        Err(WaxError::PlatformNotSupported(
-            "wax system registry install currently supports Fedora-compatible RPM repositories; this RPM distro needs repo-file parsing first".into(),
+        Err(OilError::PlatformNotSupported(
+            "oil system registry install currently supports Fedora-compatible RPM repositories; this RPM distro needs repo-file parsing first".into(),
         ))
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
-        let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
+        let dir = crate::ui::dirs::oil_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
         let safe: String = self
             .baseurl
@@ -82,11 +82,11 @@ impl DnfRegistry {
         let repomd_url = format!("{}/repodata/repomd.xml", self.baseurl);
         let resp =
             client.get(&repomd_url).send().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to fetch repomd.xml: {}", e))
+                OilError::InstallError(format!("Failed to fetch repomd.xml: {}", e))
             })?;
 
         if !resp.status().is_success() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Failed to fetch repomd.xml: HTTP {}",
                 resp.status()
             )));
@@ -95,10 +95,10 @@ impl DnfRegistry {
         let repomd_xml = resp
             .text()
             .await
-            .map_err(|e| WaxError::InstallError(format!("Failed to read repomd.xml: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("Failed to read repomd.xml: {}", e)))?;
 
         let primary_location = find_primary_location(&repomd_xml).ok_or_else(|| {
-            WaxError::InstallError("Could not find primary.xml in repomd.xml".to_string())
+            OilError::InstallError("Could not find primary.xml in repomd.xml".to_string())
         })?;
 
         let primary_url = format!("{}/{}", self.baseurl, primary_location);
@@ -106,11 +106,11 @@ impl DnfRegistry {
 
         let resp =
             client.get(&primary_url).send().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to fetch primary.xml: {}", e))
+                OilError::InstallError(format!("Failed to fetch primary.xml: {}", e))
             })?;
 
         if !resp.status().is_success() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Failed to fetch primary index: HTTP {}",
                 resp.status()
             )));
@@ -119,32 +119,32 @@ impl DnfRegistry {
         let bytes = resp
             .bytes()
             .await
-            .map_err(|e| WaxError::InstallError(format!("Failed to read primary index: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("Failed to read primary index: {}", e)))?;
 
         let xml_content = if primary_location.ends_with(".gz") {
             let mut decoder = GzDecoder::new(&bytes[..]);
             let mut s = String::new();
             decoder.read_to_string(&mut s).map_err(|e| {
-                WaxError::InstallError(format!("Failed to decompress primary.xml.gz: {}", e))
+                OilError::InstallError(format!("Failed to decompress primary.xml.gz: {}", e))
             })?;
             s
         } else if primary_location.ends_with(".zst") {
             let mut decoder = zstd::Decoder::new(&bytes[..]).map_err(|e| {
-                WaxError::InstallError(format!("Failed to create zstd decoder: {}", e))
+                OilError::InstallError(format!("Failed to create zstd decoder: {}", e))
             })?;
             let mut s = String::new();
             decoder.read_to_string(&mut s).map_err(|e| {
-                WaxError::InstallError(format!("Failed to decompress primary.xml.zst: {}", e))
+                OilError::InstallError(format!("Failed to decompress primary.xml.zst: {}", e))
             })?;
             s
         } else {
             String::from_utf8(bytes.to_vec()).map_err(|e| {
-                WaxError::InstallError(format!("primary.xml is not valid UTF-8: {}", e))
+                OilError::InstallError(format!("primary.xml is not valid UTF-8: {}", e))
             })?
         };
 
         let packages = parse_primary_xml(&xml_content, &self.baseurl)
-            .map_err(|e| WaxError::InstallError(format!("Failed to parse primary.xml: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("Failed to parse primary.xml: {}", e)))?;
 
         debug!("Parsed {} packages from DNF repo", packages.len());
 

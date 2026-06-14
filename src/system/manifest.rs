@@ -1,11 +1,11 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 fn manifest_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME").map_err(|_| WaxError::InstallError("HOME not set".into()))?;
+    let home = std::env::var("HOME").map_err(|_| OilError::InstallError("HOME not set".into()))?;
     Ok(PathBuf::from(home)
-        .join(".wax")
+        .join(".oil")
         .join("system")
         .join("manifests"))
 }

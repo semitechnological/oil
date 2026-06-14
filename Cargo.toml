@@ -1,16 +1,15 @@
 [package]
-name = "waxpkg"
-version = "0.17.9-system"
+name = "oil"
+version = "0.18.0"
 edition = "2021"
-authors = ["Wax Contributors"]
-description = "Fast Homebrew-compatible package manager"
+authors = ["Oil Contributors"]
+description = "Native package manager for Alpenglow and general use"
 license = "MIT"
-repository = "https://github.com/semitechnological/wax"
-homepage = "https://github.com/semitechnological/wax"
-documentation = "https://docs.rs/waxpkg"
+repository = "https://github.com/tschk/oil"
+homepage = "https://github.com/tschk/oil"
 readme = "README.md"
-keywords = ["package-manager", "homebrew", "macos", "cli", "installer"]
-categories = ["command-line-utilities", "development-tools"]
+keywords = ["package-manager", "system", "cli", "alpenglow"]
+categories = ["command-line-utilities", "system"]
 exclude = [
     "build/*",
     ".poc/*",
@@ -21,8 +20,23 @@ exclude = [
     "tests/*",
 ]
 
+[features]
+# OS-gated system registries — disable what you don't need to cut binary size
+default = ["system-all"]
+system-all = ["system-apt", "system-dnf", "system-pacman", "system-apk", "system-xbps", "system-brew", "system-nix"]
+system-apt = []
+system-dnf = []
+system-pacman = []
+system-apk = []
+system-xbps = []
+system-brew = []
+system-nix = []
+platform-linux = []
+platform-macos = []
+platform-windows = []
+
 [[bin]]
-name = "wax"
+name = "oil"
 path = "src/main.rs"
 
 [dependencies]
@@ -30,7 +44,7 @@ clap = { version = "4", features = ["derive", "cargo"] }
 clap_complete = "4"
 
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.13", features = ["json", "stream", "gzip", "brotli"] }
+reqwest = { version = "0.13", features = ["json", "stream", "gzip"] }
 futures = "0.3"
 rustls-webpki = "0.103.13"
 

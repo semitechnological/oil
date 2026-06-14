@@ -10,7 +10,7 @@ use crate::cask::{
 use crate::commands::version_install;
 use crate::deps::resolve_dependencies;
 use crate::discovery::discover_manually_installed_casks;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::formula_parser::{BuildSystem, FormulaParser};
 use crate::install::{create_symlinks, InstallMode, InstallState, InstalledPackage};
 use crate::signal::{check_cancelled, clear_active_multi, set_active_multi};
@@ -53,7 +53,7 @@ async fn install_from_source_task(
     // Use the local tap .rb file if available; otherwise fetch from homebrew-core.
     let ruby_content = if let Some(rb_path) = &formula.rb_path {
         tokio::fs::read_to_string(rb_path).await.map_err(|e| {
-            crate::error::WaxError::BuildError(format!(
+            crate::error::OilError::BuildError(format!(
                 "Failed to read formula file {}: {}",
                 rb_path.display(),
                 e
@@ -73,7 +73,7 @@ async fn install_from_source_task(
     {
         let (dl_url, dl_sha) =
             FormulaParser::extract_platform_source(&ruby_content).ok_or_else(|| {
-                WaxError::BuildError(format!(
+                OilError::BuildError(format!(
                     "Formula '{}' has no pre-built binary for this platform (os={}, arch={})",
                     formula.name,
                     std::env::consts::OS,
@@ -85,7 +85,7 @@ async fn install_from_source_task(
         let client = reqwest::Client::new();
         let response = client.get(&dl_url).send().await?;
         if !response.status().is_success() {
-            return Err(WaxError::BuildError(format!(
+            return Err(OilError::BuildError(format!(
                 "Failed to download binary: HTTP {}",
                 response.status()
             )));
@@ -93,7 +93,7 @@ async fn install_from_source_task(
         let bytes = response.bytes().await?;
         let actual_sha = format!("{:x}", sha2::Sha256::digest(&bytes));
         if actual_sha != dl_sha {
-            return Err(WaxError::ChecksumMismatch {
+            return Err(OilError::ChecksumMismatch {
                 expected: dl_sha,
                 actual: actual_sha,
             });
@@ -129,7 +129,7 @@ async fn install_from_source_task(
         for target in &parsed_formula.bin_install_targets {
             let dest_path = Path::new(&target.destination);
             if dest_path.is_absolute() || target.destination.split('/').any(|part| part == "..") {
-                return Err(WaxError::BuildError(format!(
+                return Err(OilError::BuildError(format!(
                     "Formula '{}' has invalid bin.install destination '{}'",
                     formula.name, target.destination
                 )));
@@ -157,7 +157,7 @@ async fn install_from_source_task(
             }
         }
         if !missing_bins.is_empty() {
-            return Err(WaxError::BuildError(format!(
+            return Err(OilError::BuildError(format!(
                 "Formula '{}' is broken: bin.install target(s) not found after extracting {}: {}",
                 formula.name,
                 dl_url,
@@ -165,7 +165,7 @@ async fn install_from_source_task(
             )));
         }
         if copied_bins == 0 {
-            return Err(WaxError::BuildError(format!(
+            return Err(OilError::BuildError(format!(
                 "Formula '{}' is broken: no bin.install targets were installed",
                 formula.name
             )));
@@ -208,7 +208,7 @@ async fn install_from_source_task(
 
     if parsed_formula.source.url.is_empty() {
         spinner.finish_and_clear();
-        return Err(WaxError::BuildError(format!(
+        return Err(OilError::BuildError(format!(
             "Formula '{}' has no stable source URL; install it with --head",
             formula.name
         )));
@@ -224,7 +224,7 @@ async fn install_from_source_task(
     let response = client.get(&parsed_formula.source.url).send().await?;
 
     if !response.status().is_success() {
-        return Err(WaxError::BuildError(format!(
+        return Err(OilError::BuildError(format!(
             "Failed to download source: HTTP {}",
             response.status()
         )));
@@ -234,7 +234,7 @@ async fn install_from_source_task(
     let sha256 = format!("{:x}", sha2::Sha256::digest(&content));
     tokio::fs::write(&source_tarball, &content).await?;
     if sha256 != parsed_formula.source.sha256 {
-        return Err(WaxError::ChecksumMismatch {
+        return Err(OilError::ChecksumMismatch {
             expected: parsed_formula.source.sha256.clone(),
             actual: sha256,
         });
@@ -305,7 +305,7 @@ async fn resolve_bin_install_source(root: &Path, source: &str) -> Result<std::pa
     }
     let source_path = Path::new(source);
     if source_path.components().count() != 1 {
-        return Err(WaxError::BuildError(format!(
+        return Err(OilError::BuildError(format!(
             "Unsupported bin.install glob '{}'",
             source
         )));
@@ -325,7 +325,7 @@ async fn resolve_bin_install_source(root: &Path, source: &str) -> Result<std::pa
     match matches.len() {
         1 => Ok(matches.remove(0)),
         0 => Ok(root.join(source)),
-        _ => Err(WaxError::BuildError(format!(
+        _ => Err(OilError::BuildError(format!(
             "Formula bin.install glob '{}' matched multiple files",
             source
         ))),
@@ -353,7 +353,7 @@ async fn stage_binary_release_download(
             .output()
             .await?;
         if !tar_output.status.success() {
-            return Err(WaxError::BuildError(format!(
+            return Err(OilError::BuildError(format!(
                 "Failed to extract tarball: {}",
                 String::from_utf8_lossy(&tar_output.stderr)
             )));
@@ -423,7 +423,7 @@ async fn install_from_head_task(
 
     let ruby_content = if let Some(rb_path) = &formula.rb_path {
         tokio::fs::read_to_string(rb_path).await.map_err(|e| {
-            crate::error::WaxError::BuildError(format!(
+            crate::error::OilError::BuildError(format!(
                 "Failed to read formula file {}: {}",
                 rb_path.display(),
                 e
@@ -460,7 +460,7 @@ async fn install_from_head_task(
 
     if !clone_output.status.success() {
         let stderr = String::from_utf8_lossy(&clone_output.stderr);
-        return Err(crate::error::WaxError::BuildError(format!(
+        return Err(crate::error::OilError::BuildError(format!(
             "Failed to clone HEAD: {}",
             stderr
         )));
@@ -748,7 +748,7 @@ async fn install_impl(
         external_pb,
     } = args;
     if package_names.is_empty() {
-        return Err(WaxError::InvalidInput("No packages specified".to_string()));
+        return Err(OilError::InvalidInput("No packages specified".to_string()));
     }
 
     for name in package_names {
@@ -768,7 +768,7 @@ async fn install_impl(
 
         return match crate::system::SystemManager::detect().await? {
             Some(mgr) => mgr.install_with_options(package_names, run_scripts).await,
-            None => Err(WaxError::PlatformNotSupported(
+            None => Err(OilError::PlatformNotSupported(
                 "No supported wax system registry found".to_string(),
             )),
         };
@@ -968,7 +968,7 @@ async fn install_impl(
             eprintln!("{}: {}", pkg, err);
         }
         if all_to_install.is_empty() && detected_casks.is_empty() {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "Cannot install any packages (all failed validation)".to_string(),
             ));
         }
@@ -987,7 +987,7 @@ async fn install_impl(
     if all_to_install.is_empty() {
         if let Some(task) = cask_task {
             task.await
-                .map_err(|e| WaxError::InstallError(format!("cask task failed: {}", e)))??;
+                .map_err(|e| OilError::InstallError(format!("cask task failed: {}", e)))??;
         }
         hint_user_prefix_path_if_needed(install_mode, quiet);
         return Ok(());
@@ -1049,7 +1049,7 @@ async fn install_impl(
             by_name
                 .get(name.as_str())
                 .copied()
-                .ok_or_else(|| WaxError::FormulaNotFound(name.clone()))
+                .ok_or_else(|| OilError::FormulaNotFound(name.clone()))
         })
         .collect::<Result<_>>()?;
 
@@ -1223,11 +1223,11 @@ async fn install_impl(
             .as_ref()
             .and_then(|b| b.stable.as_ref())
             .ok_or_else(|| {
-                WaxError::BottleNotAvailable(format!("{} (no bottle info)", pkg.name))
+                OilError::BottleNotAvailable(format!("{} (no bottle info)", pkg.name))
             })?;
 
         let bottle_file = bottle_info.file_for_platform(&platform).ok_or_else(|| {
-            WaxError::BottleNotAvailable(format!("{} for platform {}", pkg.name, platform))
+            OilError::BottleNotAvailable(format!("{} for platform {}", pkg.name, platform))
         })?;
 
         let url = bottle_file.url.clone();
@@ -1329,7 +1329,7 @@ async fn install_impl(
             let extract_dir = temp_dir.path().join(&name);
             BottleDownloader::extract(&tarball_path, &extract_dir)?;
 
-            Ok::<_, WaxError>((name, version, extract_dir, sha256, rebuild))
+            Ok::<_, OilError>((name, version, extract_dir, sha256, rebuild))
         });
     }
 
@@ -1388,7 +1388,7 @@ async fn install_impl(
                     }
                 }
             }
-            Ok(Err(WaxError::Interrupted)) => {
+            Ok(Err(OilError::Interrupted)) => {
                 cancelled = true;
             }
             Ok(Err(e)) => {
@@ -1409,7 +1409,7 @@ async fn install_impl(
     }
 
     if cancelled {
-        return Err(WaxError::Interrupted);
+        return Err(OilError::Interrupted);
     }
 
     if !failed_packages.is_empty() && !quiet {
@@ -1417,7 +1417,7 @@ async fn install_impl(
             eprintln!("{}", err);
         }
         if all_to_install.len() == failed_packages.len() {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "All package downloads failed".to_string(),
             ));
         }
@@ -1462,7 +1462,7 @@ async fn install_impl(
     }
     if let Some(task) = cask_task {
         task.await
-            .map_err(|e| WaxError::InstallError(format!("cask task failed: {}", e)))??;
+            .map_err(|e| OilError::InstallError(format!("cask task failed: {}", e)))??;
     }
     hint_user_prefix_path_if_needed(install_mode, quiet);
     Ok(())
@@ -1540,7 +1540,7 @@ where
         }
 
         BottleDownloader::validate_runtime(&version_dir).map_err(|err| {
-            WaxError::InstallError(format!(
+            OilError::InstallError(format!(
                 "{} is already installed, but runtime linkage check failed: {}. Run wax reinstall {}",
                 package, err, package
             ))
@@ -1634,7 +1634,7 @@ pub async fn install_extracted_bottle(
             .await
             .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))
             .map_err(|e| {
-                WaxError::InstallError(format!(
+                OilError::InstallError(format!(
                     "Failed to clean old version at {}: {}",
                     formula_cellar.display(),
                     e
@@ -1645,7 +1645,7 @@ pub async fn install_extracted_bottle(
         .await
         .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))
         .map_err(|e| {
-            WaxError::InstallError(format!(
+            OilError::InstallError(format!(
                 "Failed to create cellar directory {}: {}",
                 formula_cellar.display(),
                 e
@@ -1722,9 +1722,9 @@ pub async fn install_extracted_bottle(
 
 /// Per-cask install pipeline failure (download, verify, disk, or install).
 enum CaskPipelineFail {
-    Download { name: String, err: WaxError },
-    Checksum { name: String, err: WaxError },
-    Install { name: String, err: WaxError },
+    Download { name: String, err: OilError },
+    Checksum { name: String, err: OilError },
+    Install { name: String, err: OilError },
 }
 
 fn reuse_download_bar_as_install_spinner(pb: &ProgressBar, prefix: &str) {
@@ -1849,7 +1849,7 @@ async fn install_casks(
                         || details.url.contains("/macos")
                         || details.url.contains("apple-darwin"))
                 {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Cask '{}' does not provide a Linux artifact for platform {}. Refusing to download macOS binary: {}",
                         name, platform, details.url
                     )));
@@ -1872,12 +1872,12 @@ async fn install_casks(
                 } else if let Some(t) = infer_artifact_type_from_cask_artifacts(&details) {
                     t
                 } else {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Unsupported artifact type for URL: {}",
                         details.url
                     )));
                 };
-                Ok::<_, WaxError>((name, details, artifact_type.to_string()))
+                Ok::<_, OilError>((name, details, artifact_type.to_string()))
             })
         })
         .collect();
@@ -1892,7 +1892,7 @@ async fn install_casks(
     }
 
     if resolved.is_empty() && linux_cask_installs.is_empty() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "No casks could be resolved".to_string(),
         ));
     }
@@ -1976,7 +1976,7 @@ async fn install_casks(
                 .await
                 .map_err(|_| CaskPipelineFail::Download {
                     name: name.clone(),
-                    err: WaxError::InstallError("download worker cancelled".into()),
+                    err: OilError::InstallError("download worker cancelled".into()),
                 })?;
 
             if let Err(e) = check_cancelled() {
@@ -2058,7 +2058,7 @@ async fn install_casks(
 
     // Serialize cask state updates to avoid file corruption from concurrent writes.
     if !successful_casks.is_empty() {
-        let cask_state = CaskState::new().map_err(|e| WaxError::InstallError(e.to_string()))?;
+        let cask_state = CaskState::new().map_err(|e| OilError::InstallError(e.to_string()))?;
         for (name, installed_cask, details) in successful_casks {
             if let Err(e) = cask_state
                 .add_with_details(installed_cask, Some(&details))
@@ -2122,7 +2122,7 @@ async fn install_casks(
 
     if !linux_cask_installs.is_empty() {
         let pm = SystemPm::detect().await.ok_or_else(|| {
-            WaxError::InstallError(
+            OilError::InstallError(
                 "No supported package manager found for Linux cask install".to_string(),
             )
         })?;
@@ -2177,7 +2177,7 @@ async fn install_casks(
                 crate::timing::elapsed_suffix(elapsed)
             );
         }
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "Some casks failed: {}",
             failed.join(", ")
         )))

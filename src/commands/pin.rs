@@ -1,5 +1,5 @@
 use crate::error::validate_package_name;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::InstallState;
 use console::style;
 
@@ -31,7 +31,7 @@ pub async fn list_pinned() -> Result<()> {
 
 pub async fn pin(packages: &[String]) -> Result<()> {
     if packages.is_empty() {
-        return Err(WaxError::InvalidInput("No packages specified".to_string()));
+        return Err(OilError::InvalidInput("No packages specified".to_string()));
     }
 
     let state = InstallState::new()?;
@@ -66,7 +66,7 @@ pub async fn pin(packages: &[String]) -> Result<()> {
 
 pub async fn unpin(packages: &[String]) -> Result<()> {
     if packages.is_empty() {
-        return Err(WaxError::InvalidInput("No packages specified".to_string()));
+        return Err(OilError::InvalidInput("No packages specified".to_string()));
     }
 
     let state = InstallState::new()?;

@@ -1,7 +1,7 @@
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::discovery::discover_manually_installed_casks;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{remove_symlinks, InstallState};
 use crate::lockfile::Lockfile;
 use crate::signal::{clear_current_op, set_current_op};
@@ -37,7 +37,7 @@ pub async fn uninstall(
         names
     } else {
         if formulae.is_empty() {
-            return Err(WaxError::InvalidInput(
+            return Err(OilError::InvalidInput(
                 "Specify package name(s) or use --all to uninstall everything".to_string(),
             ));
         }
@@ -120,7 +120,7 @@ async fn uninstall_impl(
         } else if let Some(manifest) = windows_state::find_manifest(formula_name)? {
             return uninstall_windows_package(&manifest, dry_run, start, quiet, prefix).await;
         } else {
-            return Err(WaxError::NotInstalled(formula_name.to_string()));
+            return Err(OilError::NotInstalled(formula_name.to_string()));
         }
     };
 
@@ -204,7 +204,7 @@ async fn uninstall_windows_package(
 
 fn run_native_uninstall(command: &str, args: &[String]) -> Result<()> {
     if !cfg!(target_os = "windows") {
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "native Windows uninstall is only supported on Windows".into(),
         ));
     }
@@ -212,7 +212,7 @@ fn run_native_uninstall(command: &str, args: &[String]) -> Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "native uninstall command failed with {status}: {command}"
         )))
     }
@@ -292,7 +292,7 @@ async fn uninstall_package_direct(
     let formula_dir = cellar.join(formula_name);
     if formula_dir.exists() {
         tokio::fs::remove_dir_all(&formula_dir).await.map_err(|e| {
-            crate::error::WaxError::InstallError(format!(
+            crate::error::OilError::InstallError(format!(
                 "Failed to remove formula directory {}: {}",
                 formula_dir.display(),
                 e
@@ -435,7 +435,7 @@ async fn uninstall_cask(
 
     let cask = installed_casks
         .get(cask_name)
-        .ok_or_else(|| WaxError::NotInstalled(cask_name.to_string()))?;
+        .ok_or_else(|| OilError::NotInstalled(cask_name.to_string()))?;
 
     if dry_run {
         if !quiet {

@@ -35,7 +35,7 @@ pub async fn tap(
             // `wax tap user/repo` without the `add` subcommand — treat as add.
             let tap = args.into_iter().next().unwrap_or_default();
             if tap.is_empty() {
-                return Err(crate::error::WaxError::InvalidInput(
+                return Err(crate::error::OilError::InvalidInput(
                     "No tap specified".to_string(),
                 ));
             }

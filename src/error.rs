@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum WaxError {
+pub enum OilError {
     #[error("HTTP error: {0}")]
     HttpError(#[from] reqwest::Error),
 
@@ -72,7 +72,7 @@ pub enum WaxError {
     Interrupted,
 }
 
-pub type Result<T> = std::result::Result<T, WaxError>;
+pub type Result<T> = std::result::Result<T, OilError>;
 
 /// Validate that a package/formula name doesn't contain path traversal or injection characters.
 /// Allows alphanumeric, hyphens, underscores, periods, plus signs, and `@` (for versioned names).
@@ -80,32 +80,32 @@ pub type Result<T> = std::result::Result<T, WaxError>;
 /// well-formed, relative-style paths (no leading/trailing '/', empty segments, or '.' segments).
 pub fn validate_package_name(name: &str) -> Result<()> {
     if name.is_empty() {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "Package name cannot be empty".to_string(),
         ));
     }
     if name.starts_with('/') || name.ends_with('/') {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "Package name must not start or end with '/': {}",
             name
         )));
     }
     for segment in name.split('/') {
         if segment.is_empty() {
-            return Err(WaxError::InvalidInput(format!(
+            return Err(OilError::InvalidInput(format!(
                 "Package name contains empty path segment: {}",
                 name
             )));
         }
         if segment == "." || segment == ".." {
-            return Err(WaxError::InvalidInput(format!(
+            return Err(OilError::InvalidInput(format!(
                 "Package name contains invalid path segment '{}': {}",
                 segment, name
             )));
         }
     }
     if name.contains("..") {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "Package name contains path traversal: {}",
             name
         )));
@@ -114,7 +114,7 @@ pub fn validate_package_name(name: &str) -> Result<()> {
         .chars()
         .all(|c| c.is_alphanumeric() || "-_.+@/".contains(c))
     {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "Package name contains invalid characters: {}",
             name
         )));

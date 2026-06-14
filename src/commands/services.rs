@@ -1,5 +1,5 @@
 use crate::bottle::homebrew_prefix;
-use crate::error::{validate_package_name, Result, WaxError};
+use crate::error::{validate_package_name, Result, OilError};
 use crate::install::InstallState;
 use console::style;
 #[cfg(target_os = "macos")]
@@ -202,13 +202,13 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
     let installed = state.load().await?;
 
     if !installed.contains_key(formula_name) {
-        return Err(WaxError::NotInstalled(formula_name.to_string()));
+        return Err(OilError::NotInstalled(formula_name.to_string()));
     }
 
     #[cfg(target_os = "macos")]
     {
         let plist = find_service_plist(formula_name).ok_or_else(|| {
-            WaxError::ServiceError(format!(
+            OilError::ServiceError(format!(
                 "{} does not have a service definition (no plist found)",
                 formula_name
             ))
@@ -224,7 +224,7 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
 
         if let Some(priority) = nice {
             if !(-20..=20).contains(&priority) {
-                return Err(WaxError::ServiceError(
+                return Err(OilError::ServiceError(
                     "Nice priority must be between -20 and 20".to_string(),
                 ));
             }
@@ -250,12 +250,12 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
             .arg(&target_plist)
             .output()
             .await
-            .map_err(|e| WaxError::ServiceError(format!("launchctl failed: {}", e)))?;
+            .map_err(|e| OilError::ServiceError(format!("launchctl failed: {}", e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             if !stderr.contains("already loaded") {
-                return Err(WaxError::ServiceError(format!(
+                return Err(OilError::ServiceError(format!(
                     "launchctl load failed: {}",
                     stderr
                 )));
@@ -272,7 +272,7 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
     #[cfg(target_os = "linux")]
     {
         let unit = find_systemd_unit(formula_name).ok_or_else(|| {
-            WaxError::ServiceError(format!(
+            OilError::ServiceError(format!(
                 "{} does not have a systemd service unit",
                 formula_name
             ))
@@ -290,10 +290,10 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
             .args(["--user", "enable", "--now", &unit_name])
             .output()
             .await
-            .map_err(|e| WaxError::ServiceError(format!("systemctl failed: {}", e)))?;
+            .map_err(|e| OilError::ServiceError(format!("systemctl failed: {}", e)))?;
 
         if !output.status.success() {
-            return Err(WaxError::ServiceError(format!(
+            return Err(OilError::ServiceError(format!(
                 "systemctl enable failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -308,7 +308,7 @@ pub async fn services_start(formula_name: &str, nice: Option<i32>) -> Result<()>
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        return Err(WaxError::ServiceError(
+        return Err(OilError::ServiceError(
             "Service management not supported on this platform".to_string(),
         ));
     }
@@ -331,7 +331,7 @@ pub async fn services_stop(formula_name: &str) -> Result<()> {
             if alt_path.exists() {
                 return stop_launchctl(&alt_path, formula_name).await;
             }
-            return Err(WaxError::ServiceError(format!(
+            return Err(OilError::ServiceError(format!(
                 "{} service is not running",
                 formula_name
             )));
@@ -347,10 +347,10 @@ pub async fn services_stop(formula_name: &str) -> Result<()> {
             .args(["--user", "disable", "--now", &unit_name])
             .output()
             .await
-            .map_err(|e| WaxError::ServiceError(format!("systemctl failed: {}", e)))?;
+            .map_err(|e| OilError::ServiceError(format!("systemctl failed: {}", e)))?;
 
         if !output.status.success() {
-            return Err(WaxError::ServiceError(format!(
+            return Err(OilError::ServiceError(format!(
                 "systemctl disable failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             )));
@@ -365,7 +365,7 @@ pub async fn services_stop(formula_name: &str) -> Result<()> {
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    Err(WaxError::ServiceError(
+    Err(OilError::ServiceError(
         "Service management not supported on this platform".to_string(),
     ))
 }
@@ -377,12 +377,12 @@ async fn stop_launchctl(plist_path: &Path, formula_name: &str) -> Result<()> {
         .arg(plist_path)
         .output()
         .await
-        .map_err(|e| WaxError::ServiceError(format!("launchctl failed: {}", e)))?;
+        .map_err(|e| OilError::ServiceError(format!("launchctl failed: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if !stderr.contains("Could not find specified service") {
-            return Err(WaxError::ServiceError(format!(
+            return Err(OilError::ServiceError(format!(
                 "launchctl unload failed: {}",
                 stderr
             )));

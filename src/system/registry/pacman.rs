@@ -1,5 +1,5 @@
 use super::{PackageIndex, PackageMetadata};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::io::Read;
@@ -28,7 +28,7 @@ impl PacmanRegistry {
     }
 
     fn cache_path(&self, repo: &str) -> Result<std::path::PathBuf> {
-        let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
+        let dir = crate::ui::dirs::oil_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
         Ok(dir.join(format!(
             "pacman-{}-{}-{}.json",
@@ -67,7 +67,7 @@ impl PacmanRegistry {
             debug!("Fetching pacman db: {}", url);
 
             let resp = client.get(&url).send().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to fetch pacman db from {}: {}", url, e))
+                OilError::InstallError(format!("Failed to fetch pacman db from {}: {}", url, e))
             })?;
 
             if !resp.status().is_success() {
@@ -80,11 +80,11 @@ impl PacmanRegistry {
             }
 
             let bytes = resp.bytes().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to read pacman db body: {}", e))
+                OilError::InstallError(format!("Failed to read pacman db body: {}", e))
             })?;
 
             let pkgs = parse_pacman_db(&bytes, &self.mirror, repo, &self.arch).map_err(|e| {
-                WaxError::InstallError(format!("Failed to parse pacman db for {}: {}", repo, e))
+                OilError::InstallError(format!("Failed to parse pacman db for {}: {}", repo, e))
             })?;
 
             debug!("Parsed {} packages from {}", pkgs.len(), repo);
@@ -124,14 +124,14 @@ fn parse_pacman_db(
 
     for entry in archive
         .entries()
-        .map_err(|e| WaxError::InstallError(format!("Failed to read pacman tar: {}", e)))?
+        .map_err(|e| OilError::InstallError(format!("Failed to read pacman tar: {}", e)))?
     {
         let mut entry = entry
-            .map_err(|e| WaxError::InstallError(format!("Failed to read tar entry: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("Failed to read tar entry: {}", e)))?;
 
         let entry_path = entry
             .path()
-            .map_err(|e| WaxError::InstallError(format!("Bad path: {}", e)))?
+            .map_err(|e| OilError::InstallError(format!("Bad path: {}", e)))?
             .to_string_lossy()
             .to_string();
 
@@ -143,7 +143,7 @@ fn parse_pacman_db(
         let mut content = String::new();
         entry
             .read_to_string(&mut content)
-            .map_err(|e| WaxError::InstallError(format!("Failed to read desc: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("Failed to read desc: {}", e)))?;
 
         if let Some(pkg) = parse_desc(&content, mirror, repo, arch) {
             packages.insert(pkg.name.clone(), pkg);

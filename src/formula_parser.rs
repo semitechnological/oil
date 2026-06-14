@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
@@ -154,7 +154,7 @@ impl FormulaParser {
             }
         }
 
-        Err(WaxError::ParseError(format!(
+        Err(OilError::ParseError(format!(
             "Field '{}' not found in formula",
             field
         )))
@@ -226,7 +226,7 @@ impl FormulaParser {
             }
         }
 
-        Err(WaxError::ParseError(
+        Err(OilError::ParseError(
             "Install block not found in formula".to_string(),
         ))
     }
@@ -513,7 +513,7 @@ impl FormulaParser {
         let first_letter = formula_name
             .chars()
             .next()
-            .ok_or_else(|| WaxError::ParseError("Empty formula name".to_string()))?
+            .ok_or_else(|| OilError::ParseError("Empty formula name".to_string()))?
             .to_lowercase();
 
         let url = format!(
@@ -526,11 +526,11 @@ impl FormulaParser {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| WaxError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| OilError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
         let response = client.get(&url).send().await?;
 
         if !response.status().is_success() {
-            return Err(WaxError::ParseError(format!(
+            return Err(OilError::ParseError(format!(
                 "Failed to fetch formula: HTTP {}",
                 response.status()
             )));
@@ -544,7 +544,7 @@ impl FormulaParser {
         let first_letter = cask_name
             .chars()
             .next()
-            .ok_or_else(|| WaxError::ParseError("Empty cask name".to_string()))?
+            .ok_or_else(|| OilError::ParseError("Empty cask name".to_string()))?
             .to_lowercase();
 
         let url = format!(
@@ -557,11 +557,11 @@ impl FormulaParser {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| WaxError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| OilError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
         let response = client.get(&url).send().await?;
 
         if !response.status().is_success() {
-            return Err(WaxError::ParseError(format!(
+            return Err(OilError::ParseError(format!(
                 "Failed to fetch cask: HTTP {}",
                 response.status()
             )));

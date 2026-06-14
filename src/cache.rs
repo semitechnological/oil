@@ -25,7 +25,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn new() -> Result<Self> {
-        let cache_dir = dirs::wax_cache_dir()?;
+        let cache_dir = dirs::oil_cache_dir()?;
         Ok(Self { cache_dir })
     }
 

@@ -118,28 +118,28 @@ impl Drop for ProgressBarGuard {
 }
 
 pub mod dirs {
-    use crate::error::{Result, WaxError};
+    use crate::error::{Result, OilError};
     use std::path::PathBuf;
 
     pub fn home_dir() -> Result<PathBuf> {
         std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-            WaxError::InstallError(
+            OilError::InstallError(
                 "$HOME environment variable is not set. Cannot determine home directory."
                     .to_string(),
             )
         })
     }
 
-    /// Central wax data directory: ~/.wax
-    pub fn wax_dir() -> Result<PathBuf> {
-        Ok(home_dir()?.join(".wax"))
+    /// Central oil data directory: ~/.oil
+    pub fn oil_dir() -> Result<PathBuf> {
+        Ok(home_dir()?.join(".oil"))
     }
 
-    pub fn wax_cache_dir() -> Result<PathBuf> {
-        Ok(wax_dir()?.join("cache"))
+    pub fn oil_cache_dir() -> Result<PathBuf> {
+        Ok(oil_dir()?.join("cache"))
     }
 
-    pub fn wax_logs_dir() -> Result<PathBuf> {
-        Ok(wax_dir()?.join("logs"))
+    pub fn oil_logs_dir() -> Result<PathBuf> {
+        Ok(oil_dir()?.join("logs"))
     }
 }

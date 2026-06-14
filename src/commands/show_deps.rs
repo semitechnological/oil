@@ -1,5 +1,5 @@
 use crate::cache::Cache;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::InstallState;
 use console::style;
 use std::collections::{HashMap, HashSet};
@@ -14,7 +14,7 @@ pub async fn deps(cache: &Cache, formula: &str, tree: bool, installed: bool) -> 
 
     let target = formula_index
         .get(formula)
-        .ok_or_else(|| WaxError::FormulaNotFound(formula.to_string()))?;
+        .ok_or_else(|| OilError::FormulaNotFound(formula.to_string()))?;
 
     let installed_names: HashSet<String> = if installed {
         let state = InstallState::new()?;

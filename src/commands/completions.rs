@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
 use std::io;
@@ -12,7 +12,7 @@ pub fn completions(shell: Option<Shell>, print: bool) -> Result<()> {
     if print {
         // --print: dump to stdout for manual piping
         let mut cmd = Cli::command();
-        generate(shell, &mut cmd, "wax", &mut io::stdout());
+        generate(shell, &mut cmd, "oil", &mut io::stdout());
         Ok(())
     } else {
         // Default: auto-detect shell and install completions
@@ -36,7 +36,7 @@ fn detect_shell() -> Shell {
 
 fn install_completions(shell: Shell) -> Result<()> {
     let home =
-        std::env::var("HOME").map_err(|_| WaxError::InstallError("$HOME not set".to_string()))?;
+        std::env::var("HOME").map_err(|_| OilError::InstallError("$HOME not set".to_string()))?;
 
     let (dest, content) = match shell {
         Shell::Zsh => {
@@ -45,16 +45,16 @@ fn install_completions(shell: Shell) -> Result<()> {
             let path = dir.join("_wax");
             let mut buf = Vec::new();
             let mut cmd = Cli::command();
-            generate(Shell::Zsh, &mut cmd, "wax", &mut buf);
+            generate(Shell::Zsh, &mut cmd, "oil", &mut buf);
             (path, buf)
         }
         Shell::Bash => {
             let dir = PathBuf::from(&home).join(".local/share/bash-completion/completions");
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join("wax");
+            let path = dir.join("oil");
             let mut buf = Vec::new();
             let mut cmd = Cli::command();
-            generate(Shell::Bash, &mut cmd, "wax", &mut buf);
+            generate(Shell::Bash, &mut cmd, "oil", &mut buf);
             (path, buf)
         }
         Shell::Fish => {
@@ -63,11 +63,11 @@ fn install_completions(shell: Shell) -> Result<()> {
             let path = dir.join("wax.fish");
             let mut buf = Vec::new();
             let mut cmd = Cli::command();
-            generate(Shell::Fish, &mut cmd, "wax", &mut buf);
+            generate(Shell::Fish, &mut cmd, "oil", &mut buf);
             (path, buf)
         }
         _ => {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Auto-install not supported for {:?}. Use `wax completions {:?}` and redirect manually.",
                 shell, shell
             )));

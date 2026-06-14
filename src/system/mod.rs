@@ -15,7 +15,7 @@ pub mod resolver;
 pub mod scripts;
 pub mod state;
 
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::system::distro::DistroInfo;
 use crate::system::generations::{Generation, GenerationManager};
 use crate::system::installer::SystemInstaller;
@@ -210,13 +210,13 @@ impl SystemManager {
         let target_id = match id {
             Some(i) => i,
             None => self.gen_mgr.previous_id().await?.ok_or_else(|| {
-                WaxError::InstallError("no previous generation to roll back to".into())
+                OilError::InstallError("no previous generation to roll back to".into())
             })?,
         };
 
         let target =
             self.gen_mgr.get(target_id).await?.ok_or_else(|| {
-                WaxError::InstallError(format!("generation {} not found", target_id))
+                OilError::InstallError(format!("generation {} not found", target_id))
             })?;
 
         let mut state = SystemState::load().await?;
@@ -303,7 +303,7 @@ impl SystemManager {
             .collect();
 
         if resolved.is_empty() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "no packages found in registry for: {}",
                 packages.join(", ")
             )));
@@ -414,6 +414,17 @@ impl SystemManager {
                 cmd.args(["info", "-e", package]);
                 cmd
             }
+            SystemPm::Xbps => {
+                let mut cmd = Command::new("xbps-query");
+                cmd.args(["-l", package]);
+                cmd
+            }
+            #[cfg(any(feature = "system-nix", feature = "system-all"))]
+            SystemPm::Nix => {
+                let mut cmd = Command::new("nix-env");
+                cmd.args(["-q", package]);
+                cmd
+            }
             _ => return false,
         };
 
@@ -426,27 +437,41 @@ impl SystemManager {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
-            .map_err(|e| WaxError::InstallError(format!("HTTP client: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("HTTP client: {}", e)))?;
 
         match self.pm {
+            #[cfg(any(feature = "system-apt", feature = "system-all"))]
             SystemPm::Apt => {
                 let reg = crate::system::registry::apt::AptRegistry::default_for_host();
                 reg.load(&client).await
             }
+            #[cfg(any(feature = "system-dnf", feature = "system-all"))]
             SystemPm::Dnf | SystemPm::Yum => {
                 let reg = crate::system::registry::dnf::DnfRegistry::default_for_host()?;
                 reg.load(&client).await
             }
+            #[cfg(any(feature = "system-pacman", feature = "system-all"))]
             SystemPm::Pacman => {
                 let reg = crate::system::registry::pacman::PacmanRegistry::arch_default();
                 reg.load(&client).await
             }
+            #[cfg(any(feature = "system-apk", feature = "system-all"))]
             SystemPm::Apk => {
                 let reg = crate::system::registry::apk::ApkRegistry::alpine_default();
                 reg.load(&client).await
             }
-            _ => Err(WaxError::PlatformNotSupported(
-                "wax system registry install is not supported for this package manager".into(),
+            #[cfg(any(feature = "system-xbps", feature = "system-all"))]
+            SystemPm::Xbps => {
+                let reg = crate::system::registry::xbps::XbpsRegistry::void_musl_default();
+                reg.load(&client).await
+            }
+            #[cfg(any(feature = "system-nix", feature = "system-all"))]
+            SystemPm::Nix => {
+                let reg = crate::system::registry::nix::NixRegistry::default();
+                reg.load(&client).await
+            }
+            _ => Err(OilError::PlatformNotSupported(
+                "oil system registry install is not supported for this package manager".into(),
             )),
         }
     }
@@ -607,8 +632,8 @@ impl SystemManager {
     async fn remove_managed_packages(&self, packages: &[String]) -> Result<()> {
         for package in packages {
             let Some(manifest) = FileManifest::load_any_version(package).await? else {
-                return Err(WaxError::InstallError(format!(
-                    "{} is not installed by wax system manager",
+                return Err(OilError::InstallError(format!(
+                    "{} is not installed by oil system manager",
                     package
                 )));
             };

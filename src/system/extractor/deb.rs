@@ -4,7 +4,7 @@
 ///   - `debian-binary`   — "2.0\n"
 ///   - `control.tar.*`   — metadata (skipped)
 ///   - `data.tar.*`      — the actual file tree (we extract this)
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use tar::Archive;
@@ -19,7 +19,7 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
     let mut global = [0u8; 8];
     reader.read_exact(&mut global)?;
     if &global != b"!<arch>\n" {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Not a valid ar archive (missing global header)".to_string(),
         ));
     }
@@ -35,20 +35,20 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
 
         // Filename: bytes 0..16, right-padded with spaces
         let filename_raw = std::str::from_utf8(&header[0..16])
-            .map_err(|e| WaxError::ParseError(format!("ar filename: {}", e)))?;
+            .map_err(|e| OilError::ParseError(format!("ar filename: {}", e)))?;
         let filename = filename_raw.trim_end_matches(' ').trim_end_matches('/');
 
         // File size: bytes 48..58, ASCII decimal, right-padded with spaces
         let size_str = std::str::from_utf8(&header[48..58])
-            .map_err(|e| WaxError::ParseError(format!("ar size field: {}", e)))?
+            .map_err(|e| OilError::ParseError(format!("ar size field: {}", e)))?
             .trim();
         let size: u64 = size_str
             .parse()
-            .map_err(|e| WaxError::ParseError(format!("ar size '{}': {}", size_str, e)))?;
+            .map_err(|e| OilError::ParseError(format!("ar size '{}': {}", size_str, e)))?;
 
         // End magic: bytes 58..60 = "`\n"
         if &header[58..60] != b"`\n" {
-            return Err(WaxError::ParseError(
+            return Err(OilError::ParseError(
                 "ar file header: missing end magic".to_string(),
             ));
         }
@@ -76,7 +76,7 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
         }
     }
 
-    Err(WaxError::InstallError(
+    Err(OilError::InstallError(
         "data.tar.* member not found in .deb archive".to_string(),
     ))
 }
@@ -90,7 +90,7 @@ pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Ve
     let mut global = [0u8; 8];
     reader.read_exact(&mut global)?;
     if &global != b"!<arch>\n" {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Not a valid ar archive (missing global header)".to_string(),
         ));
     }
@@ -104,18 +104,18 @@ pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Ve
         }
 
         let filename_raw = std::str::from_utf8(&header[0..16])
-            .map_err(|e| WaxError::ParseError(format!("ar filename: {}", e)))?;
+            .map_err(|e| OilError::ParseError(format!("ar filename: {}", e)))?;
         let filename = filename_raw.trim_end_matches(' ').trim_end_matches('/');
 
         let size_str = std::str::from_utf8(&header[48..58])
-            .map_err(|e| WaxError::ParseError(format!("ar size field: {}", e)))?
+            .map_err(|e| OilError::ParseError(format!("ar size field: {}", e)))?
             .trim();
         let size: u64 = size_str
             .parse()
-            .map_err(|e| WaxError::ParseError(format!("ar size '{}': {}", size_str, e)))?;
+            .map_err(|e| OilError::ParseError(format!("ar size '{}': {}", size_str, e)))?;
 
         if &header[58..60] != b"`\n" {
-            return Err(WaxError::ParseError(
+            return Err(OilError::ParseError(
                 "ar file header: missing end magic".to_string(),
             ));
         }
@@ -140,7 +140,7 @@ pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Ve
         }
     }
 
-    Err(WaxError::InstallError(
+    Err(OilError::InstallError(
         "data.tar.* member not found in .deb archive".to_string(),
     ))
 }
@@ -186,7 +186,7 @@ fn extract_data_tar_inner<R: Read>(
         }
         "zst" => {
             let decoder = zstd::Decoder::new(&buf[..])
-                .map_err(|e| WaxError::InstallError(format!("zstd decoder error: {}", e)))?;
+                .map_err(|e| OilError::InstallError(format!("zstd decoder error: {}", e)))?;
             untar(decoder, dest_dir)
         }
         "bz2" => {

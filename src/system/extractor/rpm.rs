@@ -2,7 +2,7 @@
 ///
 /// Tries a pure-Rust RPM payload extractor first, then falls back to common
 /// platform extraction tools when an RPM uses a payload shape Wax cannot parse.
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use std::collections::HashSet;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -56,7 +56,7 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
         return extract_with_rpm2archive(path, dest_dir);
     }
 
-    Err(WaxError::InstallError(format!(
+    Err(OilError::InstallError(format!(
         "RPM extraction requires one of the following tool chains:\n\
          • rpm2cpio + cpio   (install on Fedora/RHEL: rpm-cpio / cpio)\n\
          • bsdtar            (install on Debian/Ubuntu: libarchive-tools)\n\
@@ -69,14 +69,14 @@ pub fn extract(path: &Path, dest_dir: &Path) -> Result<()> {
 fn extract_pure_rpm(path: &Path, dest_dir: &Path) -> Result<()> {
     let data = std::fs::read(path)?;
     if data.len() < 96 || data[0..4] != [0xed, 0xab, 0xee, 0xdb] {
-        return Err(WaxError::InstallError("not an rpm archive".to_string()));
+        return Err(OilError::InstallError("not an rpm archive".to_string()));
     }
 
     let mut offset = 96usize;
     offset = skip_rpm_header(&data, offset)?;
     offset = skip_rpm_header(&data, offset)?;
     if offset >= data.len() {
-        return Err(WaxError::InstallError("rpm payload missing".to_string()));
+        return Err(OilError::InstallError("rpm payload missing".to_string()));
     }
 
     let payload = decompress_payload(&data[offset..])?;
@@ -85,7 +85,7 @@ fn extract_pure_rpm(path: &Path, dest_dir: &Path) -> Result<()> {
 
 fn skip_rpm_header(data: &[u8], offset: usize) -> Result<usize> {
     if data.len() < offset + 16 || data[offset..offset + 3] != [0x8e, 0xad, 0xe8] {
-        return Err(WaxError::InstallError("rpm header missing".to_string()));
+        return Err(OilError::InstallError("rpm header missing".to_string()));
     }
 
     let count = u32::from_be_bytes([
@@ -104,9 +104,9 @@ fn skip_rpm_header(data: &[u8], offset: usize) -> Result<usize> {
         .checked_add(16)
         .and_then(|v| v.checked_add(count.checked_mul(16)?))
         .and_then(|v| v.checked_add(size))
-        .ok_or_else(|| WaxError::InstallError("rpm header too large".to_string()))?;
+        .ok_or_else(|| OilError::InstallError("rpm header too large".to_string()))?;
     if end > data.len() {
-        return Err(WaxError::InstallError("rpm header truncated".to_string()));
+        return Err(OilError::InstallError("rpm header truncated".to_string()));
     }
 
     Ok((end + 7) & !7)
@@ -126,7 +126,7 @@ fn decompress_payload(data: &[u8]) -> Result<Vec<u8>> {
     }
     if data.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         let mut decoder = zstd::Decoder::new(data).map_err(|e| {
-            WaxError::InstallError(format!("failed to read zstd rpm payload: {}", e))
+            OilError::InstallError(format!("failed to read zstd rpm payload: {}", e))
         })?;
         decoder.read_to_end(&mut out)?;
         return Ok(out);
@@ -139,7 +139,7 @@ fn decompress_payload(data: &[u8]) -> Result<Vec<u8>> {
     if data.starts_with(b"070701") {
         return Ok(data.to_vec());
     }
-    Err(WaxError::InstallError(
+    Err(OilError::InstallError(
         "unsupported rpm payload compression".to_string(),
     ))
 }
@@ -149,10 +149,10 @@ fn extract_newc(data: &[u8], dest_dir: &Path) -> Result<()> {
     loop {
         let mut header = [0u8; 110];
         if cursor.read_exact(&mut header).is_err() {
-            return Err(WaxError::InstallError("truncated cpio header".to_string()));
+            return Err(OilError::InstallError("truncated cpio header".to_string()));
         }
         if &header[0..6] != b"070701" {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "unsupported cpio format".to_string(),
             ));
         }
@@ -161,7 +161,7 @@ fn extract_newc(data: &[u8], dest_dir: &Path) -> Result<()> {
         let file_size = read_hex(&header[54..62])? as usize;
         let name_size = read_hex(&header[94..102])? as usize;
         if name_size == 0 {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "cpio entry missing name".to_string(),
             ));
         }
@@ -218,9 +218,9 @@ fn extract_newc(data: &[u8], dest_dir: &Path) -> Result<()> {
 
 fn read_hex(bytes: &[u8]) -> Result<u32> {
     let text = std::str::from_utf8(bytes)
-        .map_err(|e| WaxError::InstallError(format!("invalid cpio header: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("invalid cpio header: {}", e)))?;
     u32::from_str_radix(text, 16)
-        .map_err(|e| WaxError::InstallError(format!("invalid cpio field: {}", e)))
+        .map_err(|e| OilError::InstallError(format!("invalid cpio field: {}", e)))
 }
 
 fn align_cursor(cursor: &mut Cursor<&[u8]>, boundary: u64) {
@@ -278,22 +278,22 @@ fn extract_with_rpm2cpio(path: &Path, dest_dir: &Path) -> Result<()> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| WaxError::InstallError(format!("Failed to spawn rpm2cpio: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to spawn rpm2cpio: {}", e)))?;
 
     let cpio_stdout = rpm2cpio
         .stdout
-        .ok_or_else(|| WaxError::InstallError("rpm2cpio stdout not available".to_string()))?;
+        .ok_or_else(|| OilError::InstallError("rpm2cpio stdout not available".to_string()))?;
 
     let output = Command::new("cpio")
         .args(["-idm", "--no-absolute-filenames"])
         .current_dir(dest_dir)
         .stdin(cpio_stdout)
         .output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to run cpio: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to run cpio: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "cpio failed: {}",
             stderr.trim()
         )));
@@ -307,11 +307,11 @@ fn extract_with_bsdtar(path: &Path, dest_dir: &Path) -> Result<()> {
         .args(["-xf", &path.to_string_lossy()])
         .current_dir(dest_dir)
         .output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to run bsdtar: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to run bsdtar: {}", e)))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "bsdtar failed: {}",
             stderr.trim()
         )));
@@ -328,27 +328,27 @@ fn extract_with_rpm2archive(path: &Path, dest_dir: &Path) -> Result<()> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| WaxError::InstallError(format!("Failed to spawn rpm2archive: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to spawn rpm2archive: {}", e)))?;
 
     let archive_stdout = rpm2archive
         .stdout
         .take()
-        .ok_or_else(|| WaxError::InstallError("rpm2archive stdout not available".to_string()))?;
+        .ok_or_else(|| OilError::InstallError("rpm2archive stdout not available".to_string()))?;
 
     let tar_output = Command::new("tar")
         .args(["-xzf", "-"])
         .current_dir(dest_dir)
         .stdin(archive_stdout)
         .output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to run tar: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to run tar: {}", e)))?;
 
     let rpm2archive_output = rpm2archive
         .wait_with_output()
-        .map_err(|e| WaxError::InstallError(format!("Failed to wait for rpm2archive: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to wait for rpm2archive: {}", e)))?;
 
     if !rpm2archive_output.status.success() {
         let stderr = String::from_utf8_lossy(&rpm2archive_output.stderr);
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "rpm2archive failed: {}",
             stderr.trim()
         )));
@@ -356,7 +356,7 @@ fn extract_with_rpm2archive(path: &Path, dest_dir: &Path) -> Result<()> {
 
     if !tar_output.status.success() {
         let stderr = String::from_utf8_lossy(&tar_output.stderr);
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "tar failed: {}",
             stderr.trim()
         )));

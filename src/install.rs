@@ -1,7 +1,7 @@
 use crate::bottle::{
     detect_platform, homebrew_prefix, managed_homebrew_prefix, run_command_with_timeout,
 };
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::sudo;
 use crate::ui::dirs;
 use crate::version::sort_versions;
@@ -32,7 +32,7 @@ impl InstallMode {
 
     pub fn from_flags(user: bool, global: bool) -> Result<Option<Self>> {
         match (user, global) {
-            (true, true) => Err(WaxError::InstallError(
+            (true, true) => Err(OilError::InstallError(
                 "Cannot specify both --user and --global".to_string(),
             )),
             (true, false) => Ok(Some(InstallMode::User)),
@@ -44,12 +44,12 @@ impl InstallMode {
     pub fn validate(&self) -> Result<()> {
         if *self == InstallMode::Global {
             let prefix = managed_homebrew_prefix().ok_or_else(|| {
-                WaxError::InstallError(
+                OilError::InstallError(
                     "Global installs require an existing Homebrew/Linuxbrew prefix. Use --user or set WAX_HOMEBREW_PREFIX to a managed prefix.".to_string(),
                 )
             })?;
             if !is_writable(&prefix) {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Cannot write to {}. This usually means:\n  \
                      - You don't have permission (try: sudo wax install or wax install --user)\n  \
                      - The directory doesn't exist (Homebrew may not be installed)\n\n  \
@@ -63,7 +63,7 @@ impl InstallMode {
 
     pub fn prefix(&self) -> Result<PathBuf> {
         match self {
-            InstallMode::User => Ok(dirs::home_dir()?.join(".local").join("wax")),
+            InstallMode::User => Ok(dirs::home_dir()?.join(".local").join("oil")),
             InstallMode::Global => Ok(homebrew_prefix()),
         }
     }
@@ -162,7 +162,7 @@ pub struct InstallState {
 
 impl InstallState {
     pub fn new() -> Result<Self> {
-        let state_path = dirs::wax_dir()?.join("installed.json");
+        let state_path = dirs::oil_dir()?.join("installed.json");
         Ok(Self { state_path })
     }
 
@@ -180,7 +180,7 @@ impl InstallState {
         let parent = self
             .state_path
             .parent()
-            .ok_or_else(|| WaxError::CacheError("Cannot determine parent directory".into()))?;
+            .ok_or_else(|| OilError::CacheError("Cannot determine parent directory".into()))?;
         fs::create_dir_all(parent).await?;
 
         let json = serde_json::to_string_pretty(packages)?;
@@ -342,7 +342,7 @@ pub async fn create_symlinks(
 
     let formula_path = cellar_path.join(formula_name).join(version);
     if !formula_path.exists() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "Formula path does not exist: {}",
             formula_path.display()
         )));
@@ -472,7 +472,7 @@ fn link_directory_recursive<'a>(
                     }
                     #[cfg(not(unix))]
                     {
-                        return Err(WaxError::PlatformNotSupported(
+                        return Err(OilError::PlatformNotSupported(
                             "Symlinks not supported on this platform".to_string(),
                         ));
                     }
@@ -501,7 +501,7 @@ fn link_directory_recursive<'a>(
                     }
                     #[cfg(not(unix))]
                     {
-                        return Err(WaxError::PlatformNotSupported(
+                        return Err(OilError::PlatformNotSupported(
                             "Symlinks not supported on this platform".to_string(),
                         ));
                     }

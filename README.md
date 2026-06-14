@@ -1,294 +1,59 @@
-<div align="center">
-  <img src="/assets/images/Halftone Dots2x.png" alt="Wax Logo" width="200" />
-</div>
+# Oil — Universal Linux Package Manager
 
-# Wax
+Oil is a native Linux package manager that works on **any distribution**.
+Like Nix, it installs packages to its own prefix and doesn't conflict
+with the host package manager. Unlike Nix, Oil is minimal, fast, and
+focused on static binaries with generation-based rollback.
 
-A fast, modern package manager that leverages Homebrew's ecosystem without the overhead. Built in Rust for speed and reliability, wax provides 16-20x faster search operations and parallel installation workflows while maintaining full compatibility with Homebrew formulae and bottles.
+## Design
 
-## Overview
+- **Works everywhere** — no distro-specific bootstrap. One binary, one registry.
+- **Own prefix** — installs to `/usr/local/oil` or `~/.local/oil`. No /usr pollution.
+- **Static packages** — prefers statically linked binaries.
+- **Generation rollback** — every install creates a snapshot. Rollback with `oil rollback`.
+- **OS-gated** — compile with `--no-default-features` to strip unused registry code.
+- **Optional registries** — built-in parsers for APT, DNF, Pacman, APK, XBPS repos.
+  These are *read-only* data sources. Oil never delegates to host PMs.
 
-Wax reimagines package management by replacing Homebrew's git-based tap system with direct JSON API access and parallel async operations. It reads from the same bottle CDN and formula definitions but executes operations through a compiled binary with modern concurrency primitives. The result is a package manager that feels instant for read operations and maximizes throughput for installations.
+## Quick start
 
-## Features
+```sh
+# Install oil
+curl -fsSL https://oil.sh/install.sh | sh
 
-- **Lightning-Fast Queries**: Search and info commands execute in <100ms (16-20x faster than Homebrew)
-- **Intelligent Auto-Detection**: Automatically detects formulae vs casks - no need to specify `--cask` flags
-- **Parallel Operations**: Concurrent downloads with individual progress tracking for each package
-- **Full Cask Support**: Install, uninstall, upgrade, and manage GUI applications seamlessly
-- **Source Building**: Automatic fallback to source compilation when bottles unavailable, with support for Autotools, CMake, Meson, and Make
-- **Custom Tap Support**: Add, manage, and update third-party Homebrew taps for extended package availability
-- **Lockfile Support**: Reproducible environments via `wax.lock` with pinned versions
-- **Native Homebrew Compatibility**: Uses official formulae, bottles, and casks from Homebrew's JSON API
-- **Homebrew Interoperability**: Works standalone or alongside Homebrew without conflicts - installation order independent
-- **Modern Terminal UI**: Real-time progress bars, clean output, and responsive feedback
-- **Minimal Resource Usage**: Single compiled binary with async I/O, no Ruby runtime overhead
-- **Smart Caching**: Local formula index for offline search and instant lookups
-- **Flexible Installation**: User-local (`~/.local/wax`) or system-wide deployment options
-- **Built-in Self-Updater**: Update wax itself from crates.io (stable) or GitHub HEAD (nightly)
+# Install packages from Oil's native registry
+oil install clang lld bearssl toybox oksh
 
-## Installation
-
-**One-liner (recommended)** — downloads the pre-built binary for your platform:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/tschk/wax/master/install.sh | bash
+# Or bootstrap from your distro's repo (read-only)
+oil search ripgrep
+oil install ripgrep   # fetches from native registry, not apt/pacman
 ```
 
-Installs to `~/.local/bin/wax`. Override the destination with `WAX_INSTALL_DIR=/usr/local/bin`.
+## Native registry
 
-**From a git clone** (builds with your Rust toolchain; no GitHub download):
+Oil's primary package source is its own registry. The default URL is
+`https://packages.alpenglow.sh/oil/index.json` but you can override with
+`OIL_NATIVE_INDEX`.
 
-```bash
-git clone https://github.com/tschk/wax.git
-cd wax
-./install.sh
-```
+The index is a JSON file listing package metadata. See `sample-index.json`.
 
-To **force** a pre-built release while standing in a clone, set `WAX_USE_RELEASE=1` before `./install.sh`.
+## Build
 
-GitHub Releases ship **Linux**, **macOS**, and **Windows** binaries (`wax-linux-*`, `wax-macos-*`, `wax-windows-*.exe`) with `.sha256` sidecars when published by CI.
-The installer requires checksum verification by default. Set `WAX_NO_VERIFY=1` only when you explicitly accept installing without a `.sha256` sidecar.
-
-**Windows one-liner** — downloads `wax-windows-x64.exe` or `wax-windows-arm64.exe` from GitHub Releases (pin with `WAX_VERSION`):
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-irm https://raw.githubusercontent.com/semitechnological/wax/master/install.ps1 | iex
-```
-
-Installs to `%USERPROFILE%\.local\bin\wax.exe` unless you set `WAX_INSTALL_DIR`. To avoid changing policy, clone the repo and run `.\install.ps1` from that folder instead.
-
-**From a git clone on Windows:**
-
-```powershell
-git clone https://github.com/semitechnological/wax.git
-cd wax
-.\install.ps1
-```
-
-To **force** a release download while in a clone: `$env:WAX_USE_RELEASE = '1'; .\install.ps1`. Or build manually with [Rust](https://rustup.rs/):
-
-```powershell
-cargo build --release
-.\target\release\wax.exe --help
-```
-
-**Homebrew tap** — builds from source via cargo:
-
-**Cargo (older version):**
-
-```bash
-cargo install waxpkg
-```
-
-**From source (manual)** — equivalent to `./install.sh` from a clone:
-
-```bash
-git clone https://github.com/tschk/wax.git
-cd wax
-cargo build --release
-cp target/release/wax ~/.local/bin/
-```
-
-## Usage
-
-```bash
-# Update formula index
-wax update
-
-# Update wax itself
-wax update s             # stable (from crates.io)
-wax update self          # same as above
-wax update -s            # same as above
-wax update --self        # same as above
-wax update sn            # nightly (from GitHub HEAD)
-wax update self-nightly  # same as above
-wax update -sn           # same as above
-wax update -sf           # force reinstall stable
-wax update sn --clean    # nightly + clean cargo git cache
-wax update sn --no-clean # nightly + keep cargo cache
-wax self-update          # stable self-update
-wax self-update --nightly # nightly self-update from GitHub HEAD
-
-# Search packages
-wax search nginx
-wax s nginx          # shorthand
-
-# Show package details (auto-detects formulae or casks)
-wax info nginx
-wax info iterm2
-wax show nginx       # alias
-
-# List installed packages
-wax list
-wax ls               # shorthand
-
-# Install packages (auto-detects formulae or casks)
-wax install tree
-wax install iterm2
-wax i tree           # shorthand
-wax install tree --user    # to ~/.local/wax
-wax install tree --global  # to system directory
-wax install tree --build-from-source  # force source build
-wax install tree --no-script  # skip automatic post-install scripts
-
-# Install casks with shorthand
-wax cask iterm2
-wax c firefox
-
-# Manage custom taps
-wax tap add user/repo
-wax tap list
-wax tap update user/repo
-wax tap remove user/repo
-
-# Uninstall packages (auto-detects formulae or casks)
-wax uninstall tree
-wax uninstall iterm2
-wax rm tree          # shorthand
-
-# Check for outdated packages
-wax outdated
-
-# Upgrade packages (auto-detects formulae or casks)
-wax upgrade              # upgrade all outdated packages
-wax upgrade nginx        # upgrade specific package
-wax upgrade nginx tree   # upgrade multiple packages
-wax upgrade --self       # upgrade wax itself
-wax upgrade -s -n        # nightly self-upgrade from GitHub HEAD
-wax up -sn               # same as above
-wax up nginx             # shorthand
-
-# Generate lockfile
-# Includes packages discovered from manual installs and other package managers when present
-wax lock
-
-# Install from lockfile
-# Uses the same discovery pass to include manual installs / other package managers in the installed view
-wax sync
-```
-
-## Configuration
-
-Wax stores configuration and cache in `~/.wax/` (or platform-specific cache directory):
-
-```
-~/.wax/
-  cache/
-    formulae.json      # Cached formula index (~8,100 packages)
-    casks.json         # Cached cask index (~7,500 apps)
-  locks/
-    wax.lock          # Lockfile for reproducible installs
-  logs/
-    wax.log           # Operation logs with structured tracing
-```
-
-### Lockfile Format
-
-`wax.lock` uses TOML for human-readable version pinning:
-
-```toml
-[packages]
-nginx = { version = "1.25.3", bottle = "arm64_ventura" }
-openssl = { version = "3.1.4", bottle = "arm64_ventura" }
-tree = { version = "2.1.1", bottle = "arm64_ventura" }
-```
-
-## Architecture
-
-- `api.rs`: Homebrew JSON API client with async HTTP requests
-- `cache.rs`: Local formula/cask index management and invalidation
-- `bottle.rs`: Bottle download, extraction, and verification (SHA256 checksums)
-- `builder.rs`: Source compilation with multi-build-system support (Autotools, CMake, Meson, Make)
-- `cask.rs`: Cask handling for GUI applications (DMG mounting, app bundle copying)
-- `deps.rs`: Dependency resolution with topological sorting
-- `formula_parser.rs`: Ruby formula parsing and build metadata extraction
-- `install.rs`: Installation orchestration (download → extract → symlink → hooks)
-- `lockfile.rs`: Lockfile generation and synchronization
-- `tap.rs`: Custom tap management (add, remove, update, formula loading)
-- `commands/`: CLI command implementations (search, install, upgrade, tap, etc.)
-- `ui.rs`: Terminal UI components using indicatif for progress tracking
-- `error.rs`: Typed error handling with anyhow context
-- `main.rs`: CLI parsing with clap and logging initialization
-
-### Key Design Decisions
-
-**JSON API over Git**: Fetches all ~15,600 formulae/casks via single HTTP request rather than cloning entire tap repository. Enables instant search without filesystem traversal.
-
-**Bottles First, Source When Needed**: Prioritizes precompiled bottles for speed but automatically falls back to source compilation when bottles are unavailable. Supports multiple build systems for broad compatibility.
-
-**Post-Install Control**: Runs supported post-install hooks when available through an installed Homebrew-compatible toolchain. Use `--no-script` on install/cask commands to skip automatic post-install work.
-
-**Custom Tap Support**: Clones third-party taps as Git repositories, parses Ruby formula files, and integrates them with core formulae for unified package management.
-
-**Async-First**: Uses tokio runtime for all I/O operations. Parallel downloads with configurable concurrency limits (default 8 simultaneous).
-
-**Homebrew Interoperability**: Designed to coexist peacefully with Homebrew. Installs to the same Cellar structure using architecture-appropriate standard paths (`/opt/homebrew` on Apple Silicon, `/usr/local` on Intel). Detects and respects existing Homebrew installations, allowing both package managers to operate independently or simultaneously without conflicts. Installation order does not matter - wax functions identically whether installed before or after Homebrew.
-
-## Development
-
-```bash
-# Build debug binary
+```sh
 cargo build
-
-# Build optimized release
-cargo build --release
-
-# Run tests
-cargo test
-
-# Run with verbose logging
-cargo run -- --verbose install tree
-
-# Check for issues
-cargo fmt --check
-cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo test
-cargo audit
+cargo build --no-default-features --features "system-xbps,system-apk"
 ```
 
-Requires Rust 1.70+. Key dependencies:
+## Registry features
 
-- **CLI**: clap (parsing), console (colors), inquire (prompts)
-- **Async**: tokio (runtime), reqwest (HTTP), futures (combinators)
-- **Serialization**: serde, serde_json, toml
-- **UI**: indicatif (progress bars)
-- **Compression**: tar, flate2 (gzip), sha2 (checksums)
-- **Error Handling**: anyhow, thiserror
-- **Logging**: tracing, tracing-subscriber
-- **Build Support**: num_cpus (parallel builds), tempfile (build directories)
+Oil can read packages from existing ecosystems (feature-gated):
 
-## Performance
-
-Benchmarked against Homebrew on macOS (Apple Silicon):
-
-| Operation | Homebrew | Wax | Speedup |
-|-----------|----------|-----|---------|
-| Search    | 1.41s    | 0.09s | 16x |
-| Info      | 1.49s    | 0.08s | 20x |
-| Install   | 2.39s    | 0.55s | 4.3x |
-| Update (warm) | 0.85s | 0.15s | 5.7x |
-| Update (cold) | 13.2s | 1.0s | 13.2x |
-
-**Note**: Warm cache updates use HTTP conditional requests (ETag/If-Modified-Since) for instant responses. Cold cache updates use gzip/brotli compression for efficient downloads.
-
-See `docs/comparison.md` for detailed methodology and analysis.
-
-## Limitations
-
-- **Linux Bottles**: Linux bottles require `patchelf` for ELF binary relocation. Install it first: `wax install patchelf`
-- **Linux GUI / cask flow**: On Linux, GUI-style installs use cask Ruby metadata when an `on_linux` block is present; otherwise Wax may try snap, flatpak, or the native system package manager—not the macOS DMG install path.
-- **Build System Detection**: Source builds use heuristic detection of build systems. Complex or non-standard build configurations may fail.
-- **Formula DSL Subset**: Parses essential Ruby formula syntax. Advanced features (conditional deps, patches, custom install blocks) may not be fully supported.
-- **macOS Primary**: Developed for macOS. Linux support is functional but less tested.
-- **Post-Install Coverage**: Wax can run supported post-install hooks when a compatible `brew postinstall` command is installed. Use `--no-script` to skip this behavior. Native post-install execution without Homebrew compatibility tooling is still limited.
-
-## Acknowledgments
-
-Huge thanks to [@undivisible](https://github.com/undivisible) on GitHub for being a massive help and contributor to this project. Wax wouldn't be what it is without his support. <br>
-[@undivisible](https://github.com/undivisible): Huge thanks to [@plyght](https://github.com/plyght) for making the original base and contributing with all our projects together. Keep an eye on our org! We are going to make great things together!
-
-## License
-
-MIT License
+| Feature | Registry | Extractor |
+|---------|----------|-----------|
+| `system-apt` | Debian/Ubuntu repos | `.deb` |
+| `system-dnf` | Fedora/RHEL repos | `.rpm` |
+| `system-pacman` | Arch repos | `.pkg.tar.zst` |
+| `system-apk` | Alpine/Chimera repos | `.apk` |
+| `system-xbps` | Void repos | `.xbps` |
+| `system-nix` | Nixpkgs | Nix store |
+| (always on) | — | Oil-managed prefix |

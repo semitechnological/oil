@@ -34,7 +34,7 @@ use error::Result;
 use std::time::Instant;
 use tracing::Level;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
-use version::WAX_VERSION;
+use version::OIL_VERSION;
 
 fn should_refresh_state(command: &Commands) -> bool {
     !matches!(
@@ -92,7 +92,7 @@ async fn refresh_state_in_child_process() {
 
 async fn run_self_update(nightly: bool, force: bool, clean: bool, no_clean: bool) -> Result<()> {
     if clean && no_clean {
-        return Err(error::WaxError::InvalidInput(
+        return Err(error::OilError::InvalidInput(
             "Cannot specify both --clean and --no-clean".to_string(),
         ));
     }
@@ -118,9 +118,9 @@ async fn run_self_update(nightly: bool, force: bool, clean: bool, no_clean: bool
 }
 
 #[derive(Parser)]
-#[command(name = "wax")]
-#[command(version = WAX_VERSION)]
-#[command(about = format!("wax v{} - the fast homebrew-compat package manager", WAX_VERSION), long_about = None)]
+#[command(name = "oil")]
+#[command(version = OIL_VERSION)]
+#[command(about = format!("oil v{} - native system package manager", OIL_VERSION), long_about = None)]
 #[command(subcommand_required = false)]
 struct Cli {
     /// Print wax version, paths, and active taps (read-only; winget-style --info)
@@ -392,8 +392,8 @@ enum Commands {
     #[command(about = "List experimental feature flags")]
     Features,
 
-    #[command(about = "Show wax installation info (paths, version, active taps)")]
-    WaxInfo,
+    #[command(about = "Show oil installation info (paths, version, active taps)")]
+    OilInfo,
 
     #[command(about = "Generate lockfile from installed packages")]
     Lock,
@@ -425,9 +425,9 @@ enum Commands {
         full: bool,
     },
 
-    #[command(about = "Install packages from a Waxfile (formulae, casks, cargo, uv)")]
+    #[command(about = "Install packages from a Oilfile (formulae, casks, cargo, uv)")]
     Bundle {
-        #[arg(long, help = "Path to Waxfile (default: ./Waxfile.toml)")]
+        #[arg(long, help = "Path to Oilfile (default: ./Oilfile.toml)")]
         file: Option<String>,
         #[arg(long)]
         dry_run: bool,
@@ -519,7 +519,7 @@ enum SystemAction {
 
 #[derive(Subcommand)]
 enum BundleAction {
-    #[command(about = "Dump installed packages as a Waxfile")]
+    #[command(about = "Dump installed packages as a Oilfile")]
     Dump,
 }
 
@@ -584,14 +584,14 @@ enum TapAction {
 }
 
 fn init_logging(verbose: bool) -> Result<()> {
-    let log_dir = ui::dirs::wax_logs_dir()?;
+    let log_dir = ui::dirs::oil_logs_dir()?;
 
     std::fs::create_dir_all(&log_dir)?;
 
     let log_file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_dir.join("wax.log"))?;
+        .open(log_dir.join("oil.log"))?;
 
     let level = if verbose { Level::DEBUG } else { Level::INFO };
 
@@ -607,7 +607,7 @@ fn init_logging(verbose: bool) -> Result<()> {
 async fn handle_system_upgrade() -> Result<()> {
     match system::SystemManager::detect().await? {
         Some(mgr) => mgr.upgrade_all().await,
-        None => Err(error::WaxError::PlatformNotSupported(
+        None => Err(error::OilError::PlatformNotSupported(
             "No supported wax system registry found".to_string(),
         )),
     }
@@ -628,7 +628,7 @@ async fn main() -> Result<()> {
     init_logging(cli.verbose)?;
 
     if cli.info {
-        return commands::wax_info::wax_info();
+        return commands::oil_info::oil_info();
     }
 
     let Some(command) = cli.command else {
@@ -659,7 +659,7 @@ async fn main() -> Result<()> {
                         nightly = true;
                     }
                     other => {
-                        return Err(error::WaxError::InvalidInput(format!(
+                        return Err(error::OilError::InvalidInput(format!(
                             "Unknown update shorthand '{other}' (use s/self or sn/self-nightly)"
                         )));
                     }
@@ -793,7 +793,7 @@ async fn main() -> Result<()> {
                 no_script,
             } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.install_with_options(&packages, !no_script).await,
-                None => Err(crate::error::WaxError::PlatformNotSupported(
+                None => Err(crate::error::OilError::PlatformNotSupported(
                     "No supported wax system registry found".to_string(),
                 )),
             },
@@ -802,19 +802,19 @@ async fn main() -> Result<()> {
                 no_script,
             } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.add_with_options(&packages, !no_script).await,
-                None => Err(crate::error::WaxError::PlatformNotSupported(
+                None => Err(crate::error::OilError::PlatformNotSupported(
                     "No supported wax system registry found".to_string(),
                 )),
             },
             SystemAction::Remove { packages } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.remove(&packages).await,
-                None => Err(crate::error::WaxError::PlatformNotSupported(
+                None => Err(crate::error::OilError::PlatformNotSupported(
                     "No supported system package manager found".to_string(),
                 )),
             },
             SystemAction::Sync => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.sync_declared().await,
-                None => Err(crate::error::WaxError::PlatformNotSupported(
+                None => Err(crate::error::OilError::PlatformNotSupported(
                     "No supported system package manager found".to_string(),
                 )),
             },
@@ -857,7 +857,7 @@ async fn main() -> Result<()> {
             },
             SystemAction::Rollback { generation } => match system::SystemManager::detect().await? {
                 Some(mgr) => mgr.rollback(generation).await,
-                None => Err(crate::error::WaxError::PlatformNotSupported(
+                None => Err(crate::error::OilError::PlatformNotSupported(
                     "No supported system package manager found".to_string(),
                 )),
             },
@@ -883,7 +883,7 @@ async fn main() -> Result<()> {
             if list || matches!(pin_cmd, Some(PinCmd::List)) {
                 commands::pin::list_pinned().await
             } else if packages.is_empty() {
-                Err(crate::error::WaxError::InvalidInput(
+                Err(crate::error::OilError::InvalidInput(
                     "specify package(s) to pin, or run `wax pin list` / `wax pin --list`"
                         .to_string(),
                 ))
@@ -924,26 +924,26 @@ async fn main() -> Result<()> {
         }
         Commands::Audit => commands::audit::audit(&cache).await,
         Commands::Features => commands::features::features(),
-        Commands::WaxInfo => commands::wax_info::wax_info(),
+                Commands::OilInfo => commands::oil_info::oil_info(),
     };
 
     if let Err(e) = result {
         use console::style;
-        use error::WaxError;
+        use error::OilError;
 
         let prefix = style("error:").red().bold();
         match e {
-            WaxError::Interrupted => {
+            OilError::Interrupted => {
                 eprintln!("\n{} interrupted", style("✗").red());
                 std::process::exit(130);
             }
-            WaxError::NotInstalled(pkg) => {
+            OilError::NotInstalled(pkg) => {
                 eprintln!("{} {} is not installed", prefix, style(&pkg).magenta());
             }
-            WaxError::FormulaNotFound(pkg) => {
+            OilError::FormulaNotFound(pkg) => {
                 eprintln!("{} formula not found: {}", prefix, style(&pkg).magenta());
             }
-            WaxError::CaskNotFound(pkg) => {
+            OilError::CaskNotFound(pkg) => {
                 eprintln!("{} cask not found: {}", prefix, style(&pkg).magenta());
             }
             _ => {

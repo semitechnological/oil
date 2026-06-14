@@ -1,5 +1,5 @@
 use super::{PackageIndex, PackageMetadata};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use flate2::read::GzDecoder;
 use sha2::Digest;
 use std::collections::HashMap;
@@ -77,7 +77,7 @@ impl AptRegistry {
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
-        let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
+        let dir = crate::ui::dirs::oil_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
         Ok(dir.join(format!(
             "apt-{}-{}-{}-{}.json",
@@ -120,7 +120,7 @@ impl AptRegistry {
         let inrelease_hashes = match client.get(&inrelease_url).send().await {
             Ok(resp) if resp.status().is_success() => {
                 let bytes = resp.bytes().await.map_err(|e| {
-                    WaxError::InstallError(format!("Failed to read InRelease body: {}", e))
+                    OilError::InstallError(format!("Failed to read InRelease body: {}", e))
                 })?;
                 // Attempt GPG verification (best-effort, warn only)
                 if let Err(e) = verify_gpg(&bytes).await {
@@ -152,7 +152,7 @@ impl AptRegistry {
             debug!("Fetching {}", url);
 
             let resp = client.get(&url).send().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to fetch APT index from {}: {}", url, e))
+                OilError::InstallError(format!("Failed to fetch APT index from {}: {}", url, e))
             })?;
 
             if !resp.status().is_success() {
@@ -165,7 +165,7 @@ impl AptRegistry {
             }
 
             let bytes = resp.bytes().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to read APT index body: {}", e))
+                OilError::InstallError(format!("Failed to read APT index body: {}", e))
             })?;
 
             // Verify SHA256 against InRelease if we have the hash
@@ -175,7 +175,7 @@ impl AptRegistry {
                     hasher.update(&bytes);
                     let actual = format!("{:x}", hasher.finalize());
                     if actual != *expected {
-                        return Err(WaxError::ChecksumMismatch {
+                        return Err(OilError::ChecksumMismatch {
                             expected: expected.clone(),
                             actual,
                         });
@@ -187,7 +187,7 @@ impl AptRegistry {
             let mut decoder = GzDecoder::new(&bytes[..]);
             let mut decompressed = String::new();
             decoder.read_to_string(&mut decompressed).map_err(|e| {
-                WaxError::InstallError(format!("Failed to decompress APT Packages.gz: {}", e))
+                OilError::InstallError(format!("Failed to decompress APT Packages.gz: {}", e))
             })?;
 
             let pkgs = parse_packages_file(&decompressed, &self.mirror);
@@ -282,10 +282,10 @@ async fn verify_gpg(inrelease_bytes: &[u8]) -> Result<()> {
 
     // Write content to a temp file
     let mut tmp = NamedTempFile::new().map_err(|e| {
-        WaxError::InstallError(format!("Failed to create temp file for GPG: {}", e))
+        OilError::InstallError(format!("Failed to create temp file for GPG: {}", e))
     })?;
     tmp.write_all(inrelease_bytes)
-        .map_err(|e| WaxError::InstallError(format!("Failed to write temp file for GPG: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to write temp file for GPG: {}", e)))?;
     tmp.flush().ok();
 
     let path = tmp.path().to_path_buf();
@@ -314,7 +314,7 @@ async fn verify_gpg(inrelease_bytes: &[u8]) -> Result<()> {
         Ok(())
     } else {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "GPG signature verification of InRelease failed: {}",
             stderr.trim()
         )))

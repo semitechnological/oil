@@ -1,5 +1,5 @@
 use super::{PackageIndex, PackageMetadata};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use flate2::read::MultiGzDecoder;
 use std::io::Read;
 use std::time::{Duration, SystemTime};
@@ -35,7 +35,7 @@ impl ApkRegistry {
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
-        let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
+        let dir = crate::ui::dirs::oil_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
         Ok(dir.join(format!(
             "apk-{}-{}-{}.json",
@@ -78,7 +78,7 @@ impl ApkRegistry {
             debug!("Fetching {}", url);
 
             let resp = client.get(&url).send().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to fetch APK index from {}: {}", url, e))
+                OilError::InstallError(format!("Failed to fetch APK index from {}: {}", url, e))
             })?;
 
             if !resp.status().is_success() {
@@ -91,7 +91,7 @@ impl ApkRegistry {
             }
 
             let bytes = resp.bytes().await.map_err(|e| {
-                WaxError::InstallError(format!("Failed to read APK index body: {}", e))
+                OilError::InstallError(format!("Failed to read APK index body: {}", e))
             })?;
 
             let pkgs =
@@ -166,7 +166,7 @@ fn parse_apkindex_archive(
     let mut tar = Vec::new();
     decoder
         .read_to_end(&mut tar)
-        .map_err(|e| WaxError::InstallError(format!("Failed to decompress APKINDEX: {}", e)))?;
+        .map_err(|e| OilError::InstallError(format!("Failed to decompress APKINDEX: {}", e)))?;
 
     let mut offset = 0usize;
     while offset + 512 <= tar.len() {
@@ -180,9 +180,9 @@ fn parse_apkindex_archive(
         let data_start = offset + 512;
         let data_end = data_start
             .checked_add(size)
-            .ok_or_else(|| WaxError::InstallError("APKINDEX tar entry too large".to_string()))?;
+            .ok_or_else(|| OilError::InstallError("APKINDEX tar entry too large".to_string()))?;
         if data_end > tar.len() {
-            return Err(WaxError::InstallError(
+            return Err(OilError::InstallError(
                 "APKINDEX tar entry is truncated".to_string(),
             ));
         }
@@ -193,7 +193,7 @@ fn parse_apkindex_archive(
             .unwrap_or(false)
         {
             let content = std::str::from_utf8(&tar[data_start..data_end])
-                .map_err(|e| WaxError::InstallError(format!("APKINDEX is not UTF-8: {}", e)))?;
+                .map_err(|e| OilError::InstallError(format!("APKINDEX is not UTF-8: {}", e)))?;
             return Ok(parse_apkindex(content, mirror, branch, repo, arch));
         }
 
@@ -218,7 +218,7 @@ fn tar_header_size(bytes: &[u8]) -> Result<usize> {
     let text = String::from_utf8_lossy(bytes);
     let text = text.trim_matches(char::from(0)).trim();
     usize::from_str_radix(text, 8)
-        .map_err(|e| WaxError::InstallError(format!("invalid APKINDEX tar size: {}", e)))
+        .map_err(|e| OilError::InstallError(format!("invalid APKINDEX tar size: {}", e)))
 }
 
 fn parse_apkindex(

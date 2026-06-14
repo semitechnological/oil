@@ -1,12 +1,12 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 fn state_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").map_err(|_| WaxError::InstallError("HOME not set".into()))?;
+    let home = std::env::var("HOME").map_err(|_| OilError::InstallError("HOME not set".into()))?;
     Ok(PathBuf::from(home)
-        .join(".wax")
+        .join(".oil")
         .join("system")
         .join("state.json"))
 }

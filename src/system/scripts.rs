@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::process::Command;
@@ -27,11 +27,11 @@ pub fn run_post_install_script(package_path: &Path, prefix: &Path) -> Result<()>
 
 fn run_shell_script(script: &str, prefix: &Path) -> Result<()> {
     let mut file = NamedTempFile::new()
-        .map_err(|e| WaxError::InstallError(format!("create post-install script: {e}")))?;
+        .map_err(|e| OilError::InstallError(format!("create post-install script: {e}")))?;
     file.write_all(script.as_bytes())
-        .map_err(|e| WaxError::InstallError(format!("write post-install script: {e}")))?;
+        .map_err(|e| OilError::InstallError(format!("write post-install script: {e}")))?;
     file.flush()
-        .map_err(|e| WaxError::InstallError(format!("flush post-install script: {e}")))?;
+        .map_err(|e| OilError::InstallError(format!("flush post-install script: {e}")))?;
 
     let status = Command::new("sh")
         .arg("-e")
@@ -41,10 +41,10 @@ fn run_shell_script(script: &str, prefix: &Path) -> Result<()> {
         .env("WAX_INSTALL_PREFIX", prefix)
         .env("WAX_ROOT", prefix)
         .status()
-        .map_err(|e| WaxError::InstallError(format!("run post-install script: {e}")))?;
+        .map_err(|e| OilError::InstallError(format!("run post-install script: {e}")))?;
 
     if !status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "post-install script failed with status {}",
             status.code().unwrap_or(-1)
         )));
@@ -60,7 +60,7 @@ fn deb_postinst(path: &Path) -> Result<Option<String>> {
     let mut global = [0u8; 8];
     reader.read_exact(&mut global)?;
     if &global != b"!<arch>\n" {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "not a valid .deb archive (missing ar header)".to_string(),
         ));
     }
@@ -74,17 +74,17 @@ fn deb_postinst(path: &Path) -> Result<Option<String>> {
         }
 
         let filename_raw = std::str::from_utf8(&header[0..16])
-            .map_err(|e| WaxError::ParseError(format!("ar filename: {e}")))?;
+            .map_err(|e| OilError::ParseError(format!("ar filename: {e}")))?;
         let filename = filename_raw.trim_end_matches(' ').trim_end_matches('/');
         let size_str = std::str::from_utf8(&header[48..58])
-            .map_err(|e| WaxError::ParseError(format!("ar size field: {e}")))?
+            .map_err(|e| OilError::ParseError(format!("ar size field: {e}")))?
             .trim();
         let size: u64 = size_str
             .parse()
-            .map_err(|e| WaxError::ParseError(format!("ar size '{size_str}': {e}")))?;
+            .map_err(|e| OilError::ParseError(format!("ar size '{size_str}': {e}")))?;
 
         if &header[58..60] != b"`\n" {
-            return Err(WaxError::ParseError(
+            return Err(OilError::ParseError(
                 "ar file header: missing end magic".to_string(),
             ));
         }
@@ -123,12 +123,12 @@ fn postinst_from_control_tar(buf: &[u8], compression: &str) -> Result<Option<Str
         "xz" => read_postinst_from_tar(xz2::read::XzDecoder::new(buf)),
         "zst" => {
             let decoder = zstd::Decoder::new(buf)
-                .map_err(|e| WaxError::InstallError(format!("zstd decoder error: {e}")))?;
+                .map_err(|e| OilError::InstallError(format!("zstd decoder error: {e}")))?;
             read_postinst_from_tar(decoder)
         }
         "bz2" => read_postinst_from_tar(bzip2::read::BzDecoder::new(buf)),
         "none" => read_postinst_from_tar(buf),
-        other => Err(WaxError::InstallError(format!(
+        other => Err(OilError::InstallError(format!(
             "unsupported control.tar compression: {other}"
         ))),
     }
@@ -153,10 +153,10 @@ fn rpm_postinstall(path: &Path) -> Result<Option<String>> {
         .args(["-qp", "--scripts"])
         .arg(path)
         .output()
-        .map_err(|e| WaxError::InstallError(format!("extract rpm scripts: {e}")))?;
+        .map_err(|e| OilError::InstallError(format!("extract rpm scripts: {e}")))?;
 
     if !output.status.success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "rpm script metadata extraction failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         )));

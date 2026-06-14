@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::package_spec::Ecosystem;
 use crate::ui::dirs;
 use serde::{Deserialize, Serialize};
@@ -33,16 +33,16 @@ pub struct WindowsNativeUninstall {
     pub args: Vec<String>,
 }
 
-pub fn wax_windows_root() -> Result<PathBuf> {
-    Ok(dirs::home_dir()?.join(".local").join("wax"))
+pub fn oil_windows_root() -> Result<PathBuf> {
+    Ok(dirs::home_dir()?.join(".local").join("oil"))
 }
 
-pub fn wax_bin_dir() -> Result<PathBuf> {
-    Ok(wax_windows_root()?.join("bin"))
+pub fn oil_bin_dir() -> Result<PathBuf> {
+    Ok(oil_windows_root()?.join("bin"))
 }
 
 fn manifest_dir() -> Result<PathBuf> {
-    Ok(wax_windows_root()?.join("windows").join("manifests"))
+    Ok(oil_windows_root()?.join("windows").join("manifests"))
 }
 
 fn manifest_path(ecosystem: Ecosystem, id: &str) -> Result<PathBuf> {
@@ -125,7 +125,7 @@ impl WindowsPackageManifest {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let raw = serde_json::to_string_pretty(self).map_err(WaxError::JsonError)?;
+        let raw = serde_json::to_string_pretty(self).map_err(OilError::JsonError)?;
         std::fs::write(path, raw)?;
         Ok(())
     }
@@ -138,7 +138,7 @@ pub fn load_manifest(ecosystem: Ecosystem, id: &str) -> Result<Option<WindowsPac
     }
     let raw = std::fs::read_to_string(path)?;
     Ok(Some(
-        serde_json::from_str(&raw).map_err(WaxError::JsonError)?,
+        serde_json::from_str(&raw).map_err(OilError::JsonError)?,
     ))
 }
 
@@ -154,7 +154,7 @@ pub fn list_manifests() -> Result<Vec<WindowsPackageManifest>> {
             && entry.path().extension().and_then(|s| s.to_str()) == Some("json")
         {
             let raw = std::fs::read_to_string(entry.path())?;
-            manifests.push(serde_json::from_str(&raw).map_err(WaxError::JsonError)?);
+            manifests.push(serde_json::from_str(&raw).map_err(OilError::JsonError)?);
         }
     }
     manifests.sort_by(|a, b| {
@@ -178,7 +178,7 @@ pub fn find_manifest(raw: &str) -> Result<Option<WindowsPackageManifest>> {
         .filter(|m| m.id.eq_ignore_ascii_case(raw))
         .collect();
     if matches.len() > 1 {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "multiple Windows packages match '{raw}'; use scoop/{raw}, winget/{raw}, or choco/{raw}"
         )));
     }
@@ -196,7 +196,7 @@ pub fn validate_bin_links_available(
         }
         for link in links {
             if manifest.bin_links.iter().any(|existing| existing == link) {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "binary link {} is already owned by {}/{}",
                     link.display(),
                     manifest.ecosystem.label(),
@@ -209,11 +209,11 @@ pub fn validate_bin_links_available(
 }
 
 pub fn remove_manifest(manifest: &WindowsPackageManifest, dry_run: bool) -> Result<Vec<PathBuf>> {
-    let root = wax_windows_root()?;
+    let root = oil_windows_root()?;
     let mut removed = Vec::new();
     for path in manifest.bin_links.iter().chain(manifest.files.iter()) {
         if !path_is_under_root(path, &root) {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "refusing to remove path outside wax root: {}",
                 path.display()
             )));
@@ -282,7 +282,7 @@ mod tests {
             "Zoo.Tool",
             "1.0.0",
             "https://example.invalid/zoo.zip",
-            wax_windows_root()
+            oil_windows_root()
                 .unwrap()
                 .join("winget-apps/Zoo.Tool/1.0.0"),
             Vec::new(),
@@ -293,7 +293,7 @@ mod tests {
             "alpha",
             "2.0.0",
             "https://example.invalid/alpha.zip",
-            wax_windows_root().unwrap().join("scoop-apps/alpha/2.0.0"),
+            oil_windows_root().unwrap().join("scoop-apps/alpha/2.0.0"),
             Vec::new(),
             Vec::new(),
         );
@@ -314,7 +314,7 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         std::env::set_var("HOME", tmp.path());
-        let root = wax_windows_root().unwrap();
+        let root = oil_windows_root().unwrap();
         let staging = root.join("scoop-apps/tool/1.0.0");
         let bin = root.join("bin/tool.exe");
         std::fs::create_dir_all(&staging).unwrap();
@@ -344,13 +344,13 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let tmp = tempfile::TempDir::new().unwrap();
         std::env::set_var("HOME", tmp.path());
-        let bin = wax_bin_dir().unwrap().join("tool.exe");
+        let bin = oil_bin_dir().unwrap().join("tool.exe");
         let manifest = WindowsPackageManifest::new(
             Ecosystem::Scoop,
             "tool",
             "1.0.0",
             "https://example.invalid/tool.zip",
-            wax_windows_root().unwrap().join("scoop-apps/tool/1.0.0"),
+            oil_windows_root().unwrap().join("scoop-apps/tool/1.0.0"),
             vec![bin.clone()],
             Vec::new(),
         );

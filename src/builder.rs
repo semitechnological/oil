@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::formula_parser::{BuildSystem, ParsedFormula};
 use indicatif::ProgressBar;
 use std::path::{Path, PathBuf};
@@ -77,7 +77,7 @@ impl Builder {
             BuildSystem::Make => self.build_make(&source_dir, install_prefix).await?,
             BuildSystem::Cargo => self.build_cargo(&source_dir, install_prefix).await?,
             BuildSystem::Unknown => {
-                return Err(WaxError::BuildError(
+                return Err(OilError::BuildError(
                     "Unknown build system - cannot build from source".to_string(),
                 ))
             }
@@ -117,7 +117,7 @@ impl Builder {
             BuildSystem::Make => self.build_make(source_dir, install_prefix).await?,
             BuildSystem::Cargo => self.build_cargo(source_dir, install_prefix).await?,
             BuildSystem::Unknown => {
-                return Err(WaxError::BuildError(
+                return Err(OilError::BuildError(
                     "Unknown build system - cannot build from source".to_string(),
                 ))
             }
@@ -144,7 +144,7 @@ impl Builder {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(WaxError::BuildError(format!(
+            return Err(OilError::BuildError(format!(
                 "Failed to extract source: {}",
                 stderr
             )));
@@ -385,7 +385,7 @@ impl Builder {
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 let last_lines: Vec<&str> = stderr.lines().rev().take(50).collect();
-                return Err(WaxError::BuildError(format!(
+                return Err(OilError::BuildError(format!(
                     "{} failed:\n{}",
                     phase,
                     last_lines.into_iter().rev().collect::<Vec<_>>().join("\n")
@@ -395,7 +395,7 @@ impl Builder {
             Ok(())
         })
         .await
-        .map_err(|e| WaxError::BuildError(format!("Build task panicked: {}", e)))?
+        .map_err(|e| OilError::BuildError(format!("Build task panicked: {}", e)))?
     }
 
     fn has_ninja() -> bool {

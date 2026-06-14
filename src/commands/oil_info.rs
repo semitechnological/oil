@@ -1,24 +1,24 @@
 use crate::bottle::homebrew_prefix;
 use crate::error::Result;
 use crate::ui::dirs;
-use crate::version::WAX_VERSION;
+use crate::version::OIL_VERSION;
 use console::style;
 
-pub fn wax_info() -> Result<()> {
+pub fn oil_info() -> Result<()> {
     let prefix = homebrew_prefix();
     let cellar = prefix.join("Cellar");
     let taps_dir = prefix.join("Library/Taps");
-    let cache_dir = dirs::wax_cache_dir().unwrap_or_else(|_| prefix.join("var/cache/wax"));
-    let data_dir = dirs::wax_dir().unwrap_or_else(|_| prefix.join("etc/wax"));
-    let log_file = dirs::wax_logs_dir()
-        .map(|d| d.join("wax.log"))
-        .unwrap_or_else(|_| data_dir.join("logs/wax.log"));
+    let cache_dir = dirs::oil_cache_dir().unwrap_or_else(|_| prefix.join("var/cache/wax"));
+    let data_dir = dirs::oil_dir().unwrap_or_else(|_| prefix.join("etc/wax"));
+    let log_file = dirs::oil_logs_dir()
+        .map(|d| d.join("oil.log"))
+        .unwrap_or_else(|_| data_dir.join("logs/oil.log"));
 
     println!();
     println!(
         "{} {}",
-        style("wax").bold().magenta(),
-        style(WAX_VERSION).dim()
+        style("oil").bold().magenta(),
+        style(OIL_VERSION).dim()
     );
     println!();
 
@@ -26,7 +26,7 @@ pub fn wax_info() -> Result<()> {
         println!("  {:<22} {}", style(label).dim(), value);
     };
 
-    row("Version:", WAX_VERSION);
+    row("Version:", OIL_VERSION);
     row("Prefix:", &prefix.display().to_string());
     row("Cellar:", &cellar.display().to_string());
     row("Taps:", &taps_dir.display().to_string());

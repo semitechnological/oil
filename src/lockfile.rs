@@ -1,5 +1,5 @@
 use crate::cask::CaskState;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::InstallState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -79,7 +79,7 @@ impl Lockfile {
         }
 
         let toml_string = toml::to_string_pretty(&self)
-            .map_err(|e| WaxError::LockfileError(format!("Failed to serialize lockfile: {}", e)))?;
+            .map_err(|e| OilError::LockfileError(format!("Failed to serialize lockfile: {}", e)))?;
 
         let temp_path = temp_path_for(path);
         fs::write(&temp_path, toml_string).await?;
@@ -96,14 +96,14 @@ impl Lockfile {
         debug!("Loading lockfile from {:?}", path);
 
         if !path.exists() {
-            return Err(WaxError::LockfileError(
-                "Lockfile not found. Run 'wax lock' to generate one.".to_string(),
+            return Err(OilError::LockfileError(
+                "Lockfile not found. Run 'oil lock' to generate one.".to_string(),
             ));
         }
 
         let contents = fs::read_to_string(path).await?;
         let lockfile: Lockfile = toml::from_str(&contents)
-            .map_err(|e| WaxError::LockfileError(format!("Failed to parse lockfile: {}", e)))?;
+            .map_err(|e| OilError::LockfileError(format!("Failed to parse lockfile: {}", e)))?;
 
         debug!(
             "Loaded {} packages and {} casks from lockfile",
@@ -114,14 +114,14 @@ impl Lockfile {
     }
 
     pub fn default_path() -> PathBuf {
-        match crate::ui::dirs::wax_dir() {
-            Ok(dir) => dir.join("wax.lock"),
+        match crate::ui::dirs::oil_dir() {
+            Ok(dir) => dir.join("oil.lock"),
             Err(e) => {
                 warn!(
-                    "Could not determine wax config directory: {}; using .wax/ fallback",
+                    "Could not determine oil config directory: {}; using .wax/ fallback",
                     e
                 );
-                PathBuf::from(".wax").join("wax.lock")
+                PathBuf::from(".oil").join("oil.lock")
             }
         }
     }
@@ -150,7 +150,7 @@ fn temp_path_for(path: &Path) -> PathBuf {
     let file_name = path
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("wax.lock");
+        .unwrap_or("oil.lock");
     path.with_file_name(format!(".{}.{}.{}.tmp", file_name, pid, nanos))
 }
 

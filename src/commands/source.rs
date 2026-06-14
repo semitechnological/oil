@@ -1,5 +1,5 @@
 use crate::cache::Cache;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use console::style;
 use std::collections::HashMap;
 use tracing::instrument;
@@ -64,5 +64,5 @@ pub async fn source(cache: &Cache, formula_name: &str) -> Result<()> {
         return Ok(());
     }
 
-    Err(WaxError::FormulaNotFound(formula_name.to_string()))
+    Err(OilError::FormulaNotFound(formula_name.to_string()))
 }

@@ -1,7 +1,7 @@
 use crate::api::ApiClient;
 use crate::cache::Cache;
 use crate::cask::CaskState;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::InstallState;
 
 use console::style;
@@ -42,7 +42,7 @@ pub async fn info(api_client: &ApiClient, cache: &Cache, name: &str, cask: bool)
             return info_cask(api_client, cache, name).await;
         }
 
-        return Err(WaxError::FormulaNotFound(format!(
+        return Err(OilError::FormulaNotFound(format!(
             "{} (not found as formula or cask)",
             name
         )));
@@ -51,7 +51,7 @@ pub async fn info(api_client: &ApiClient, cache: &Cache, name: &str, cask: bool)
     let formula = formulae
         .iter()
         .find(|f| f.name == name || f.full_name == name)
-        .ok_or_else(|| WaxError::FormulaNotFound(name.to_string()))?;
+        .ok_or_else(|| OilError::FormulaNotFound(name.to_string()))?;
 
     let installed_suffix = if let Some(installed) = &formula.installed {
         if !installed.is_empty() {
@@ -173,7 +173,7 @@ async fn info_cask(api_client: &ApiClient, cache: &Cache, name: &str) -> Result<
     let cask_summary = casks
         .iter()
         .find(|c| c.token == name || c.full_token == name)
-        .ok_or_else(|| WaxError::CaskNotFound(name.to_string()))?;
+        .ok_or_else(|| OilError::CaskNotFound(name.to_string()))?;
 
     let cask = api_client.fetch_cask_details(name).await?;
 

@@ -3,7 +3,7 @@
 //! `chocolateyinstall.ps1` downloads are supported for wax-managed install.
 
 use crate::bottle::BottleDownloader;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::package_spec::Ecosystem;
 use crate::scoop;
 use crate::windows_state::{self, WindowsPackageManifest};
@@ -18,7 +18,7 @@ fn client() -> Result<reqwest::Client> {
         .timeout(std::time::Duration::from_secs(120))
         .user_agent(concat!("wax/", env!("CARGO_PKG_VERSION"), " (chocolatey)"))
         .build()
-        .map_err(|e| WaxError::InstallError(e.to_string()))
+        .map_err(|e| OilError::InstallError(e.to_string()))
 }
 
 /// Search chocolatey.org web UI; returns package ids (lowercase) matching the query.
@@ -32,7 +32,7 @@ pub async fn search_package_ids(query: &str, limit: usize) -> Result<Vec<String>
     );
     let html = client()?.get(&url).send().await?.text().await?;
     let re = Regex::new(r##"href="/packages/([^"#?]+)"##)
-        .map_err(|e| WaxError::ParseError(e.to_string()))?;
+        .map_err(|e| OilError::ParseError(e.to_string()))?;
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for cap in re.captures_iter(&html) {
@@ -62,7 +62,7 @@ pub async fn package_exists(id: &str) -> bool {
 /// Install latest `.nupkg` if it contains at least one `tools/*.exe` and no mandatory script-only layout.
 pub async fn install_portable_tools(id: &str) -> Result<()> {
     if !cfg!(target_os = "windows") {
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "Chocolatey-backed portable install is only supported on Windows".into(),
         ));
     }
@@ -96,7 +96,7 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
 
     let tools_dir = extract_root.join("tools");
     if !tools_dir.is_dir() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Chocolatey package has no tools/ directory in .nupkg (wax cannot run install scripts)"
                 .into(),
         ));
@@ -106,16 +106,16 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     collect_exe_files(&tools_dir, &mut exes, 0, 4)?;
 
     if exes.is_empty() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "No suitable portable .exe under tools/ (this package likely depends on unsupported installer script semantics)"
                 .into(),
         ));
     }
 
-    let bin_dir = windows_state::wax_bin_dir()?;
+    let bin_dir = windows_state::oil_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
-    let staging = windows_state::wax_windows_root()?
+    let staging = windows_state::oil_windows_root()?
         .join("choco-apps")
         .join(id);
     if staging.exists() {
@@ -127,7 +127,7 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     for src in &exes {
         let file_name = src
             .file_name()
-            .ok_or_else(|| WaxError::InstallError("invalid exe path".into()))?;
+            .ok_or_else(|| OilError::InstallError("invalid exe path".into()))?;
         let dest = bin_dir.join(file_name);
         copy_actions.push((src.clone(), dest));
     }

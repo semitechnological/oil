@@ -1,6 +1,6 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::ui::create_spinner;
-use crate::version::WAX_VERSION as CURRENT_VERSION;
+use crate::version::OIL_VERSION as CURRENT_VERSION;
 use console::style;
 use inquire::Confirm;
 use std::io::IsTerminal;
@@ -45,14 +45,14 @@ fn is_newer(current: &str, latest: &str) -> bool {
 
 async fn fetch_latest_crate_version(client: &reqwest::Client) -> Result<String> {
     let resp = client
-        .get("https://crates.io/api/v1/crates/waxpkg")
+        .get("https://crates.io/api/v1/crates/oil")
         .header("User-Agent", "wax-self-update")
         .send()
         .await
-        .map_err(|e| WaxError::SelfUpdateError(format!("crates.io API request failed: {e}")))?;
+        .map_err(|e| OilError::SelfUpdateError(format!("crates.io API request failed: {e}")))?;
 
     if !resp.status().is_success() {
-        return Err(WaxError::SelfUpdateError(format!(
+        return Err(OilError::SelfUpdateError(format!(
             "crates.io API returned {}",
             resp.status()
         )));
@@ -70,7 +70,7 @@ async fn fetch_latest_crate_version(client: &reqwest::Client) -> Result<String> 
     }
 
     let info: CrateInfo = resp.json().await.map_err(|e| {
-        WaxError::SelfUpdateError(format!("Failed to parse crates.io API response: {e}"))
+        OilError::SelfUpdateError(format!("Failed to parse crates.io API response: {e}"))
     })?;
 
     Ok(info.krate.max_stable_version)
@@ -97,7 +97,7 @@ pub async fn available_stable_update() -> Result<Option<String>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| WaxError::SelfUpdateError(format!("HTTP client error: {e}")))?;
+        .map_err(|e| OilError::SelfUpdateError(format!("HTTP client error: {e}")))?;
 
     let latest_version = fetch_latest_crate_version(&client).await?;
 
@@ -112,7 +112,7 @@ async fn update_from_crates(force: bool) -> Result<()> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
-        .map_err(|e| WaxError::SelfUpdateError(format!("HTTP client error: {e}")))?;
+        .map_err(|e| OilError::SelfUpdateError(format!("HTTP client error: {e}")))?;
 
     let spinner = create_spinner("Checking for updates…");
     let latest_version = fetch_latest_crate_version(&client).await?;
@@ -142,10 +142,10 @@ async fn update_from_crates(force: bool) -> Result<()> {
     println!(
         "  {} running {} (live output below)",
         style("install:").dim(),
-        style("cargo install waxpkg --bin wax --force").yellow()
+        style("cargo install oil --bin wax --force").yellow()
     );
 
-    let mut args = vec!["install", "waxpkg", "--bin", "wax"];
+    let mut args = vec!["install", "oil", "--bin", "oil"];
     if force || is_newer(CURRENT_VERSION, &latest_version) {
         args.push("--force");
     }
@@ -156,10 +156,10 @@ async fn update_from_crates(force: bool) -> Result<()> {
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
-        .map_err(|e| WaxError::SelfUpdateError(format!("Failed to run cargo: {e}")))?;
+        .map_err(|e| OilError::SelfUpdateError(format!("Failed to run cargo: {e}")))?;
 
     if !status.success() {
-        return Err(WaxError::SelfUpdateError(
+        return Err(OilError::SelfUpdateError(
             "cargo install failed".to_string(),
         ));
     }
@@ -214,7 +214,7 @@ fn should_cleanup_nightly(nightly_cleanup: Option<bool>) -> Result<bool> {
             Confirm::new("Clean Cargo git cache for wax nightly sources?")
                 .with_default(false)
                 .prompt()
-                .map_err(|e| WaxError::SelfUpdateError(format!("Failed to read prompt input: {e}")))
+                .map_err(|e| OilError::SelfUpdateError(format!("Failed to read prompt input: {e}")))
         }
     }
 }
@@ -231,7 +231,7 @@ async fn update_from_source(force: bool, nightly_cleanup: Option<bool>) -> Resul
         style("nightly (GitHub HEAD)").yellow()
     );
 
-    let mut args = vec!["install", "--git", GITHUB_REPO_URL, "--bin", "wax"];
+    let mut args = vec!["install", "--git", GITHUB_REPO_URL, "--bin", "oil"];
     if force {
         args.push("--force");
     }
@@ -248,10 +248,10 @@ async fn update_from_source(force: bool, nightly_cleanup: Option<bool>) -> Resul
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .status()
-        .map_err(|e| WaxError::SelfUpdateError(format!("Failed to run cargo: {e}")))?;
+        .map_err(|e| OilError::SelfUpdateError(format!("Failed to run cargo: {e}")))?;
 
     if !status.success() {
-        return Err(WaxError::SelfUpdateError(
+        return Err(OilError::SelfUpdateError(
             "cargo install failed".to_string(),
         ));
     }

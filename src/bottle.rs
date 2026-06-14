@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use flate2::read::GzDecoder;
 use indicatif::ProgressBar;
 use sha2::{Digest, Sha256};
@@ -31,7 +31,6 @@ impl BottleDownloader {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(300))
             .gzip(false)
-            .brotli(false)
             .build()
             .expect("Failed to create HTTP client");
 
@@ -259,10 +258,10 @@ impl BottleDownloader {
                     .header("Range", format!("bytes={}-{}", start, end))
                     .send()
                     .await
-                    .map_err(WaxError::from)?;
+                    .map_err(OilError::from)?;
 
                 if response.status().as_u16() != 206 {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Chunk {} got HTTP {} (not 206)",
                         i,
                         response.status()
@@ -276,9 +275,9 @@ impl BottleDownloader {
                 use futures::StreamExt;
                 while let Some(piece) = stream.next().await {
                     if crate::signal::is_shutdown_requested() {
-                        return Err(WaxError::Interrupted);
+                        return Err(OilError::Interrupted);
                     }
-                    let piece = piece.map_err(WaxError::from)?;
+                    let piece = piece.map_err(OilError::from)?;
                     let n = piece.len() as u64;
                     counter.fetch_add(n, Ordering::Relaxed);
                     if let Some(ref t) = totals_chunk {
@@ -296,9 +295,9 @@ impl BottleDownloader {
                     Ok::<(), std::io::Error>(())
                 })
                 .await
-                .map_err(|e| WaxError::InstallError(format!("join error: {}", e)))??;
+                .map_err(|e| OilError::InstallError(format!("join error: {}", e)))??;
 
-                Ok::<(), WaxError>(())
+                Ok::<(), OilError>(())
             }));
         }
 
@@ -340,7 +339,7 @@ impl BottleDownloader {
         }
 
         if let Some(e) = err {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Multipart download failed: {}",
                 e
             )));
@@ -375,7 +374,7 @@ impl BottleDownloader {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Download failed with HTTP {}: {}",
                 status,
                 body.chars().take(200).collect::<String>()
@@ -403,7 +402,7 @@ impl BottleDownloader {
             if crate::signal::is_shutdown_requested() {
                 drop(file);
                 let _ = tokio::fs::remove_file(dest_path).await;
-                return Err(crate::error::WaxError::Interrupted);
+                return Err(crate::error::OilError::Interrupted);
             }
             let chunk = chunk?;
             file.write_all(&chunk).await?;
@@ -497,7 +496,7 @@ impl BottleDownloader {
                 return Ok(repo.to_string());
             }
         }
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "Invalid GHCR URL format: {}",
             url
         )))
@@ -521,7 +520,7 @@ impl BottleDownloader {
         let hash = format!("{:x}", hasher.finalize());
 
         if hash != expected_sha256 {
-            return Err(WaxError::ChecksumMismatch {
+            return Err(OilError::ChecksumMismatch {
                 expected: expected_sha256.to_string(),
                 actual: hash,
             });
@@ -551,7 +550,7 @@ impl BottleDownloader {
                     .components()
                     .any(|c| c == std::path::Component::ParentDir)
             {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Tar entry contains unsafe path: {}",
                     path.display()
                 )));
@@ -564,7 +563,7 @@ impl BottleDownloader {
                     #[cfg(unix)]
                     {
                         let link_name = entry.link_name()?.ok_or_else(|| {
-                            WaxError::InstallError(format!(
+                            OilError::InstallError(format!(
                                 "Symlink entry has no link name: {}",
                                 path.display()
                             ))
@@ -573,7 +572,7 @@ impl BottleDownloader {
                         // parent-dir traversals that could escape the dest.
                         let target = Path::new(&*link_name);
                         if target.is_absolute() {
-                            return Err(WaxError::InstallError(format!(
+                            return Err(OilError::InstallError(format!(
                                 "Symlink target is absolute (path traversal): {}",
                                 link_name.display()
                             )));
@@ -588,7 +587,7 @@ impl BottleDownloader {
                                     std::path::Component::CurDir => {}
                                     std::path::Component::ParentDir => {
                                         if !normalized.pop() {
-                                            return Err(WaxError::InstallError(format!(
+                                            return Err(OilError::InstallError(format!(
                                                 "Symlink target escapes destination via parent traversal: {} -> {}",
                                                 path.display(),
                                                 link_name.display()
@@ -620,7 +619,7 @@ impl BottleDownloader {
                     }
                     #[cfg(not(unix))]
                     {
-                        return Err(WaxError::InstallError(format!(
+                        return Err(OilError::InstallError(format!(
                             "Symlinks not supported on this platform: {}",
                             path.display()
                         )));
@@ -628,7 +627,7 @@ impl BottleDownloader {
                 }
                 t if t.is_hard_link() => {
                     let link_name = entry.link_name()?.ok_or_else(|| {
-                        WaxError::InstallError(format!(
+                        OilError::InstallError(format!(
                             "Hard link entry has no link name: {}",
                             path.display()
                         ))
@@ -639,14 +638,14 @@ impl BottleDownloader {
                             .components()
                             .any(|c| c == std::path::Component::ParentDir)
                     {
-                        return Err(WaxError::InstallError(format!(
+                        return Err(OilError::InstallError(format!(
                             "Hard link target escapes destination: {}",
                             link_name.display()
                         )));
                     }
                     let link_target = canonical_dest.join(&*link_name);
                     if !link_target.starts_with(&canonical_dest) {
-                        return Err(WaxError::InstallError(format!(
+                        return Err(OilError::InstallError(format!(
                             "Hard link target escapes destination: {}",
                             link_name.display()
                         )));
@@ -1100,7 +1099,7 @@ fn validate_runtime_dir(dir: &Path) -> Result<()> {
         }
 
         if binary_has_homebrew_placeholders(&path) {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Installed Linux binary still contains unresolved Homebrew placeholders: {}",
                 path.display()
             )));
@@ -1108,14 +1107,14 @@ fn validate_runtime_dir(dir: &Path) -> Result<()> {
 
         if let Some(interpreter) = elf_interpreter(&path) {
             if interpreter.contains("@@HOMEBREW_") {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Installed binary has unresolved runtime loader placeholder: {} -> {}",
                     path.display(),
                     interpreter
                 )));
             }
             if interpreter.starts_with('/') && !Path::new(&interpreter).exists() {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Installed binary has missing runtime loader: {} -> {}",
                     path.display(),
                     interpreter
@@ -1124,7 +1123,7 @@ fn validate_runtime_dir(dir: &Path) -> Result<()> {
         }
 
         if let Some(missing_lib) = elf_missing_dependency(&path) {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Installed binary has unresolved shared library dependency: {} -> {}",
                 path.display(),
                 missing_lib

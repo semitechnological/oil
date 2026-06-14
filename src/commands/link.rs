@@ -1,12 +1,12 @@
 use crate::cask::{relink_installed_cask, unlink_installed_cask, CaskState};
 use crate::error::validate_package_name;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{create_symlinks, remove_symlinks, InstallState};
 use console::style;
 
 pub async fn link(packages: &[String]) -> Result<()> {
     if packages.is_empty() {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "Specify package name(s) to link".to_string(),
         ));
     }
@@ -55,7 +55,7 @@ pub async fn link(packages: &[String]) -> Result<()> {
 
 pub async fn unlink(packages: &[String]) -> Result<()> {
     if packages.is_empty() {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "Specify package name(s) to unlink".to_string(),
         ));
     }

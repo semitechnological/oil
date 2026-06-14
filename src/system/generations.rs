@@ -5,14 +5,14 @@
 /// generation manifest.  A `current` symlink always points at the active
 /// generation.  Rolling back is an O(1) symlink swap followed by converging
 /// the live system to the target generation's package set.
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 fn generations_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME").map_err(|_| WaxError::InstallError("HOME not set".into()))?;
+    let home = std::env::var("HOME").map_err(|_| OilError::InstallError("HOME not set".into()))?;
     Ok(PathBuf::from(home)
-        .join(".wax")
+        .join(".oil")
         .join("system")
         .join("generations"))
 }
@@ -136,7 +136,7 @@ impl GenerationManager {
             // Since generations are directories, we use std::os::windows::fs::symlink_dir.
             let target = path.file_name().unwrap();
             tokio::fs::symlink_dir(target, &tmp).await.map_err(|e| {
-                WaxError::InstallError(format!(
+                OilError::InstallError(format!(
                     "Failed to create junction for generation symlink: {}",
                     e
                 ))

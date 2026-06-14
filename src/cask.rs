@@ -1,6 +1,6 @@
 use crate::api::{Cask, CaskDetails};
 use crate::bottle::{homebrew_prefix, BottleDownloader, DownloadTotals};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::ui::dirs;
 use crate::version::sort_versions;
 use indicatif::ProgressBar;
@@ -348,7 +348,7 @@ fn cask_metadata_from_installed(cask: &InstalledCask, summary: Option<&Cask>) ->
 
 impl CaskState {
     pub fn new() -> Result<Self> {
-        let legacy_state_path = dirs::wax_dir()?.join("installed_casks.json");
+        let legacy_state_path = dirs::oil_dir()?.join("installed_casks.json");
         Ok(Self { legacy_state_path })
     }
 
@@ -359,7 +359,7 @@ impl CaskState {
     pub fn user_caskroom_dir() -> Result<PathBuf> {
         Ok(dirs::home_dir()?
             .join(".local")
-            .join("wax")
+            .join("oil")
             .join("Caskroom"))
     }
 
@@ -458,7 +458,7 @@ impl CaskState {
         let parent = self
             .legacy_state_path
             .parent()
-            .ok_or_else(|| WaxError::CacheError("Cannot determine parent directory".into()))?;
+            .ok_or_else(|| OilError::CacheError("Cannot determine parent directory".into()))?;
         fs::create_dir_all(parent).await?;
 
         let json = serde_json::to_string_pretty(casks)?;
@@ -911,7 +911,7 @@ impl StagingContext {
                         .await?;
 
                     if !unzip_output.status.success() {
-                        return Err(WaxError::InstallError(format!(
+                        return Err(OilError::InstallError(format!(
                             "Failed to mount DMG and fallback unzip failed: {} | {}",
                             String::from_utf8_lossy(&attach_output.stderr),
                             String::from_utf8_lossy(&unzip_output.stderr)
@@ -930,7 +930,7 @@ impl StagingContext {
                     .await?;
 
                 if !unzip_output.status.success() {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Failed to extract ZIP: {}",
                         String::from_utf8_lossy(&unzip_output.stderr)
                     )));
@@ -946,7 +946,7 @@ impl StagingContext {
                     .await?;
 
                 if !tar_output.status.success() {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Failed to extract tarball: {}",
                         String::from_utf8_lossy(&tar_output.stderr)
                     )));
@@ -972,7 +972,7 @@ impl StagingContext {
 
                 let filename = decoded_filename.as_ref();
                 if filename.contains("..") || filename.starts_with("/") || filename.contains("\0") {
-                    return Err(WaxError::InstallError(format!(
+                    return Err(OilError::InstallError(format!(
                         "Filename contains unsafe characters: {}",
                         filename
                     )));
@@ -994,10 +994,10 @@ impl StagingContext {
         match tokio::task::spawn_blocking(move || dir_size(&staging_root_for_size))
             .await
             .map_err(|e| {
-                WaxError::InstallError(format!("Failed to scan staging directory: {}", e))
+                OilError::InstallError(format!("Failed to scan staging directory: {}", e))
             })? {
             Ok(size) if size > MAX_STAGING_SIZE_BYTES => {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Extracted cask staging directory exceeds size limit ({} > {} bytes)",
                     size, MAX_STAGING_SIZE_BYTES
                 )));
@@ -1109,7 +1109,7 @@ impl CaskInstaller {
     }
 
     fn user_bin_dir() -> Result<PathBuf> {
-        Ok(dirs::home_dir()?.join(".local").join("wax").join("bin"))
+        Ok(dirs::home_dir()?.join(".local").join("oil").join("bin"))
     }
 
     async fn is_dir_writable(path: &Path) -> bool {
@@ -1323,7 +1323,7 @@ impl CaskInstaller {
         let hash = format!("{:x}", hasher.finalize());
 
         if hash != expected_sha256 {
-            return Err(WaxError::ChecksumMismatch {
+            return Err(OilError::ChecksumMismatch {
                 expected: expected_sha256.to_string(),
                 actual: hash,
             });
@@ -1339,7 +1339,7 @@ impl CaskInstaller {
             .components()
             .any(|c| c == std::path::Component::ParentDir)
         {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Path contains directory traversal: {}",
                 path.display()
             )));
@@ -1366,13 +1366,13 @@ impl CaskInstaller {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| {
-                    WaxError::InstallError(format!("Invalid app source: {}", source_rel))
+                    OilError::InstallError(format!("Invalid app source: {}", source_rel))
                 })?;
 
             info!("Installing app: {}", app_name);
 
             if !source.exists() {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "App source does not exist: {:?}",
                     source
                 )));
@@ -1395,7 +1395,7 @@ impl CaskInstaller {
                 .await?;
 
             if !cp_output.status.success() {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Failed to copy app: {}",
                     String::from_utf8_lossy(&cp_output.stderr)
                 )));
@@ -1413,7 +1413,7 @@ impl CaskInstaller {
         source_rel: &str,
     ) -> Result<()> {
         #[cfg(not(target_os = "macos"))]
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "PKG installers are macOS-only".to_string(),
         ));
         #[cfg(target_os = "macos")]
@@ -1422,7 +1422,7 @@ impl CaskInstaller {
             info!("Installing PKG: {:?}", source);
 
             if !source.exists() {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "PKG source does not exist: {:?}",
                     source
                 )));
@@ -1436,7 +1436,7 @@ impl CaskInstaller {
                 ))
             })
             .await
-            .map_err(|e| WaxError::InstallError(e.to_string()))??;
+            .map_err(|e| OilError::InstallError(e.to_string()))??;
 
             let install_output = tokio::process::Command::new("sudo")
                 .arg("installer")
@@ -1448,7 +1448,7 @@ impl CaskInstaller {
                 .await?;
 
             if !install_output.status.success() {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Failed to install PKG: {}",
                     String::from_utf8_lossy(&install_output.stderr)
                 )));
@@ -1725,7 +1725,7 @@ impl CaskInstaller {
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
-                WaxError::InstallError(format!("Invalid font source: {}", source_rel))
+                OilError::InstallError(format!("Invalid font source: {}", source_rel))
             })?;
 
         #[cfg(target_os = "macos")]
@@ -1757,7 +1757,7 @@ impl CaskInstaller {
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| {
-                WaxError::InstallError(format!("Invalid manpage source: {}", source_rel))
+                OilError::InstallError(format!("Invalid manpage source: {}", source_rel))
             })?;
 
         let man_prefix = crate::bottle::homebrew_prefix().join("share/man");
@@ -1814,7 +1814,7 @@ impl CaskInstaller {
             .await?;
 
         if !cp_output.status.success() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Failed to copy artifact: {}",
                 String::from_utf8_lossy(&cp_output.stderr)
             )));
@@ -1834,7 +1834,7 @@ impl CaskInstaller {
         let name = Path::new(source_rel)
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(|| WaxError::InstallError(format!("Invalid source: {}", source_rel)))?;
+            .ok_or_else(|| OilError::InstallError(format!("Invalid source: {}", source_rel)))?;
 
         tokio::fs::create_dir_all(dest_parent).await?;
         let dest = dest_parent.join(name);
@@ -1858,7 +1858,7 @@ impl CaskInstaller {
             .await?;
 
         if !cp_output.status.success() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Failed to copy to {:?}: {}",
                 dest_parent,
                 String::from_utf8_lossy(&cp_output.stderr)
@@ -1891,7 +1891,7 @@ impl CaskInstaller {
             "zsh" => prefix.join("share/zsh/site-functions"),
             "fish" => prefix.join("share/fish/vendor_completions.d"),
             _ => {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Unsupported shell: {}",
                     shell
                 )));
@@ -1948,11 +1948,11 @@ async fn validate_binary_for_host(path: &Path) -> Result<()> {
     let is_macho = crate::bottle::is_mach_o(&content);
 
     match std::env::consts::OS {
-        "linux" if is_macho => Err(WaxError::InstallError(format!(
+        "linux" if is_macho => Err(OilError::InstallError(format!(
             "Refusing to install macOS Mach-O binary on Linux: {}",
             path.display()
         ))),
-        "macos" if is_elf => Err(WaxError::InstallError(format!(
+        "macos" if is_elf => Err(OilError::InstallError(format!(
             "Refusing to install Linux ELF binary on macOS: {}",
             path.display()
         ))),
@@ -2092,7 +2092,7 @@ mod tests {
         let user_bin_dir = CaskInstaller::user_bin_dir().unwrap();
         assert_eq!(
             user_bin_dir,
-            dirs::home_dir().unwrap().join(".local/wax/bin")
+            dirs::home_dir().unwrap().join(".local/oil/bin")
         );
     }
 

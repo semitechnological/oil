@@ -1,4 +1,4 @@
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::system::registry::{parse_dep_name, PackageIndex, PackageMetadata};
 use std::collections::HashSet;
 
@@ -54,7 +54,7 @@ impl<'a> Resolver<'a> {
         }
 
         if !missing_requested.is_empty() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "package{} not found in system registry: {}",
                 if missing_requested.len() == 1 {
                     ""
@@ -68,7 +68,7 @@ impl<'a> Resolver<'a> {
         if !state.missing_deps.is_empty() {
             state.missing_deps.sort();
             state.missing_deps.dedup();
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "required system dependencies not found: {}",
                 state.missing_deps.join(", ")
             )));

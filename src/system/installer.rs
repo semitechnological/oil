@@ -1,5 +1,5 @@
 use crate::bottle::BottleDownloader;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::system::extractor::extract_package_tracked;
 use crate::system::manifest::FileManifest;
 use crate::system::registry::PackageMetadata;
@@ -102,7 +102,7 @@ impl SystemInstaller {
                 let _permit = sem
                     .acquire_many(max_conns as u32)
                     .await
-                    .map_err(|e| WaxError::InstallError(format!("Semaphore error: {}", e)))?;
+                    .map_err(|e| OilError::InstallError(format!("Semaphore error: {}", e)))?;
 
                 debug!("Downloading {} from {}", pkg_name, url);
                 let mut clear_guard = ProgressBarGuard::new(&pb_clone);
@@ -124,14 +124,14 @@ impl SystemInstaller {
                     }
                     let actual = format!("{:x}", hasher.finalize());
                     if actual != *expected {
-                        return Err(WaxError::ChecksumMismatch {
+                        return Err(OilError::ChecksumMismatch {
                             expected: expected.clone(),
                             actual,
                         });
                     }
                 }
 
-                Ok::<PackageDownloadData, WaxError>((index, pkg_name, pkg_version, dest))
+                Ok::<PackageDownloadData, OilError>((index, pkg_name, pkg_version, dest))
             }));
         }
 
@@ -152,7 +152,7 @@ impl SystemInstaller {
         }
 
         if !failures.is_empty() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "failed to install {} of {} packages:\n{}",
                 failures.len(),
                 packages.len(),
@@ -183,7 +183,7 @@ impl SystemInstaller {
         if run_scripts {
             for (_, name, _, package_path, _, _) in &manifest_data {
                 run_post_install_script(package_path, prefix).map_err(|e| {
-                    WaxError::InstallError(format!(
+                    OilError::InstallError(format!(
                         "post-install script for {} failed: {}",
                         name, e
                     ))
@@ -192,7 +192,7 @@ impl SystemInstaller {
         }
 
         // Save manifests for each successfully installed package. A missing
-        // manifest would make wax think the install never happened, so surface
+        // manifest would make oil think the install never happened, so surface
         // this as an install failure rather than silently losing state.
         for (_, name, version, _, files, dirs) in manifest_data {
             let manifest = FileManifest {
@@ -206,7 +206,7 @@ impl SystemInstaller {
                     .as_secs() as i64,
             };
             manifest.save().await.map_err(|e| {
-                WaxError::InstallError(format!(
+                OilError::InstallError(format!(
                     "failed to save file manifest for {}: {}",
                     manifest.package, e
                 ))
@@ -214,7 +214,7 @@ impl SystemInstaller {
         }
 
         if installed.len() != packages.len() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "installed {} of {} resolved packages",
                 installed.len(),
                 packages.len()
@@ -236,7 +236,7 @@ impl SystemInstaller {
             return std::path::PathBuf::from(home).join(".local");
         }
 
-        crate::ui::dirs::wax_dir()
+        crate::ui::dirs::oil_dir()
             .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
             .join("system")
             .join("root")
@@ -267,7 +267,7 @@ fn wrap_prefix_commands(
         .map(|path| shell_quote(&path.to_string_lossy()))
         .collect::<Vec<_>>()
         .join(":");
-    let real_root = prefix.join(".wax-real");
+    let real_root = prefix.join(".oil-real");
 
     let mut additions = Vec::new();
     for file in files.iter() {
@@ -409,13 +409,13 @@ mod tests {
         let library_files = files.clone();
         wrap_prefix_commands(&prefix, &mut files, &library_files).unwrap();
 
-        let real = prefix.join(".wax-real/bin/tool");
+        let real = prefix.join(".oil-real/bin/tool");
         assert!(real.exists());
         assert!(files.contains(&real));
         let wrapper = std::fs::read_to_string(&command).unwrap();
         assert!(wrapper.contains("'"));
         assert!(wrapper.contains("usr/lib/x86_64-linux-gnu"));
-        assert!(wrapper.contains(".wax-real/bin/tool"));
+        assert!(wrapper.contains(".oil-real/bin/tool"));
     }
 
     #[test]
@@ -448,6 +448,6 @@ mod tests {
             .unwrap()
             .file_type()
             .is_symlink());
-        assert!(!prefix.join(".wax-real/usr/bin/tool").exists());
+        assert!(!prefix.join(".oil-real/usr/bin/tool").exists());
     }
 }

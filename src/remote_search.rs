@@ -73,16 +73,16 @@ async fn load_or_fetch_scoop_index(cache_dir: &std::path::Path) -> Result<Vec<St
     debug!("Refreshing Scoop Main bucket index via GitHub API…");
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(180))
-        .user_agent(concat!("wax/", env!("CARGO_PKG_VERSION"), " (scoop-index)"))
+        .user_agent(concat!("oil/", env!("CARGO_PKG_VERSION"), " (scoop-index)"))
         .build()
-        .map_err(|e| crate::error::WaxError::InstallError(e.to_string()))?;
+        .map_err(|e| crate::error::OilError::InstallError(e.to_string()))?;
 
     let resp = client
         .get("https://api.github.com/repos/ScoopInstaller/Main/git/trees/master?recursive=1")
         .send()
         .await?;
     if !resp.status().is_success() {
-        return Err(crate::error::WaxError::InstallError(format!(
+        return Err(crate::error::OilError::InstallError(format!(
             "Scoop index GitHub API: HTTP {}",
             resp.status()
         )));
@@ -91,7 +91,7 @@ async fn load_or_fetch_scoop_index(cache_dir: &std::path::Path) -> Result<Vec<St
     let tree = v
         .get("tree")
         .and_then(|t| t.as_array())
-        .ok_or_else(|| crate::error::WaxError::ParseError("no tree array".into()))?;
+        .ok_or_else(|| crate::error::OilError::ParseError("no tree array".into()))?;
 
     let mut names = Vec::new();
     for item in tree {
@@ -159,7 +159,7 @@ async fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String> {
     let output = command
         .output()
         .await
-        .map_err(|e| crate::error::WaxError::InstallError(format!("git failed: {e}")))?;
+        .map_err(|e| crate::error::OilError::InstallError(format!("git failed: {e}")))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let detail = if stderr.is_empty() {
@@ -167,7 +167,7 @@ async fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String> {
         } else {
             stderr
         };
-        return Err(crate::error::WaxError::InstallError(format!(
+        return Err(crate::error::OilError::InstallError(format!(
             "git {} failed: {detail}",
             args.join(" ")
         )));
@@ -361,7 +361,7 @@ pub fn print_remote_hits(hits: &[RemoteHit]) {
             "{} {} · {}",
             tag,
             style(&h.id).magenta(),
-            style(format!("wax install {hint}")).dim()
+            style(format!("oil install {hint}")).dim()
         );
         if let Some(b) = &h.blurb {
             println!("  {}", style(b).dim());

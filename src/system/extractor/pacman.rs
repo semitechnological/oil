@@ -1,6 +1,6 @@
 /// Extract a .pkg.tar.zst (or .xz/.gz) pacman package to dest_dir.
 /// Skips pacman metadata files: .PKGINFO, .MTREE, .BUILDINFO.
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use tar::Archive;
@@ -13,7 +13,7 @@ pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Ve
 
     if name.ends_with(".pkg.tar.zst") {
         let decoder = zstd::Decoder::new(file)
-            .map_err(|e| WaxError::InstallError(format!("zstd decoder error: {}", e)))?;
+            .map_err(|e| OilError::InstallError(format!("zstd decoder error: {}", e)))?;
         untar(decoder, dest_dir)
     } else if name.ends_with(".pkg.tar.xz") {
         let decoder = xz2::read::XzDecoder::new(file);
@@ -22,7 +22,7 @@ pub fn extract_tracked(path: &Path, dest_dir: &Path) -> Result<(Vec<PathBuf>, Ve
         let decoder = flate2::read::GzDecoder::new(file);
         untar(decoder, dest_dir)
     } else {
-        Err(WaxError::InstallError(format!(
+        Err(OilError::InstallError(format!(
             "Unsupported pacman package format: {}",
             name
         )))

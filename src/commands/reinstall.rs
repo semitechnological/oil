@@ -1,7 +1,7 @@
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::commands::{install, uninstall};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{InstallMode, InstallState};
 use crate::signal::{clear_active_multi, clear_current_op, set_active_multi, set_current_op};
 use crate::ui::{PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE, SPINNER_TICK_CHARS};
@@ -42,7 +42,7 @@ pub async fn reinstall(cache: &Cache, packages: &[String], cask: bool, all: bool
         names
     } else {
         if packages.is_empty() {
-            return Err(WaxError::InvalidInput(
+            return Err(OilError::InvalidInput(
                 "Specify package name(s) or use --all to reinstall everything".to_string(),
             ));
         }
@@ -61,7 +61,7 @@ pub async fn reinstall(cache: &Cache, packages: &[String], cask: bool, all: bool
         })
         .collect();
     if !missing.is_empty() {
-        return Err(WaxError::NotInstalled(missing.join(", ")));
+        return Err(OilError::NotInstalled(missing.join(", ")));
     }
 
     let total = resolved.len();

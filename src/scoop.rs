@@ -8,7 +8,7 @@
 //! separately for full Chocolatey semantics.
 
 use crate::bottle::BottleDownloader;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::package_spec::Ecosystem;
 use crate::windows_state::{self, WindowsPackageManifest};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -111,7 +111,7 @@ fn normalize_scoop_hash(raw: &str) -> String {
 
 fn parse_bin_paths(bin: &Option<Value>) -> Result<Vec<PathBuf>> {
     let Some(bin) = bin else {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Scoop manifest has no bin field (wax cannot guess executables)".into(),
         ));
     };
@@ -133,14 +133,14 @@ fn parse_bin_paths(bin: &Option<Value>) -> Result<Vec<PathBuf>> {
             }
         }
         _ => {
-            return Err(WaxError::ParseError(
+            return Err(OilError::ParseError(
                 "Scoop manifest bin field has unsupported shape".into(),
             ));
         }
     }
 
     if out.is_empty() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Scoop manifest bin field resolved to no executables".into(),
         ));
     }
@@ -152,7 +152,7 @@ fn join_under_root(root: &Path, rel: &Path) -> Result<PathBuf> {
         match c {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(WaxError::InstallError(format!(
+                return Err(OilError::InstallError(format!(
                     "Unsafe path in manifest: {}",
                     rel.display()
                 )));
@@ -164,10 +164,10 @@ fn join_under_root(root: &Path, rel: &Path) -> Result<PathBuf> {
 
 /// Parse a manifest JSON string and resolve URLs for the current architecture.
 pub fn resolve_manifest_json(raw: &str) -> Result<ResolvedScoopPackage> {
-    let m: ScoopManifest = serde_json::from_str(raw).map_err(WaxError::JsonError)?;
+    let m: ScoopManifest = serde_json::from_str(raw).map_err(OilError::JsonError)?;
 
     if let Some(field) = unsupported_script_fields(&m) {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "This Scoop manifest uses `{field}` scripts; wax only supports portable zip/tar.gz installs without PowerShell hooks. Try another package or install with Scoop itself."
         )));
     }
@@ -175,7 +175,7 @@ pub fn resolve_manifest_json(raw: &str) -> Result<ResolvedScoopPackage> {
     let arch = scoop_arch_key();
     let (url_raw, hash_raw, extract_dir) = if let Some(map) = &m.architecture {
         let entry = map.get(arch).ok_or_else(|| {
-            WaxError::InstallError(format!(
+            OilError::InstallError(format!(
                 "Scoop manifest has no {arch} architecture entry for this host"
             ))
         })?;
@@ -186,10 +186,10 @@ pub fn resolve_manifest_json(raw: &str) -> Result<ResolvedScoopPackage> {
         )
     } else {
         let url = m.url.ok_or_else(|| {
-            WaxError::InstallError("Scoop manifest has no url (and no architecture block)".into())
+            OilError::InstallError("Scoop manifest has no url (and no architecture block)".into())
         })?;
         let hash = m.hash.ok_or_else(|| {
-            WaxError::InstallError("Scoop manifest has no hash (and no architecture block)".into())
+            OilError::InstallError("Scoop manifest has no hash (and no architecture block)".into())
         })?;
         (url, hash, None)
     };
@@ -197,7 +197,7 @@ pub fn resolve_manifest_json(raw: &str) -> Result<ResolvedScoopPackage> {
     let download_url = strip_url_fragment(&url_raw).to_string();
     let sha256 = normalize_scoop_hash(&hash_raw);
     if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "Expected 64-char sha256 hex from manifest, got {sha256:?}"
         )));
     }
@@ -237,10 +237,10 @@ async fn fetch_manifest_text(bucket_base: &str, package: &str) -> Result<String>
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()
-        .map_err(|e| WaxError::InstallError(e.to_string()))?;
+        .map_err(|e| OilError::InstallError(e.to_string()))?;
     let resp = client.get(&url).send().await?;
     if !resp.status().is_success() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "Failed to fetch manifest {}: HTTP {}",
             url,
             resp.status()
@@ -257,7 +257,7 @@ fn archive_kind_from_url(url: &str) -> Result<&'static str> {
     if lower.contains(".tar.gz") || lower.ends_with(".tgz") {
         return Ok("tar.gz");
     }
-    Err(WaxError::InstallError(format!(
+    Err(OilError::InstallError(format!(
         "Unsupported download type for wax scoop-install (need .zip or .tar.gz/.tgz URL): {url}"
     )))
 }
@@ -265,12 +265,12 @@ fn archive_kind_from_url(url: &str) -> Result<&'static str> {
 pub(crate) fn extract_zip_file(zip_path: &Path, dest_dir: &Path) -> Result<()> {
     let file = std::fs::File::open(zip_path)?;
     let mut archive =
-        zip::ZipArchive::new(file).map_err(|e| WaxError::InstallError(e.to_string()))?;
+        zip::ZipArchive::new(file).map_err(|e| OilError::InstallError(e.to_string()))?;
 
     for i in 0..archive.len() {
         let mut entry = archive
             .by_index(i)
-            .map_err(|e| WaxError::InstallError(e.to_string()))?;
+            .map_err(|e| OilError::InstallError(e.to_string()))?;
         let rel = match entry.enclosed_name() {
             Some(p) => p.to_path_buf(),
             None => continue,
@@ -299,7 +299,7 @@ fn extract_tar_gz(tarball: &Path, dest_dir: &Path) -> Result<()> {
 /// Download manifest from `bucket_base`, then download & extract the artifact.
 pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Result<()> {
     if !cfg!(target_os = "windows") {
-        return Err(WaxError::PlatformNotSupported(
+        return Err(OilError::PlatformNotSupported(
             "scoop-install is only supported on Windows (portable .exe layout)".into(),
         ));
     }
@@ -366,7 +366,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
         None => extract_root.clone(),
     };
     if !source_tree.exists() {
-        return Err(WaxError::InstallError(format!(
+        return Err(OilError::InstallError(format!(
             "Extracted files missing expected extract_dir {:?}",
             resolved.extract_dir
         )));
@@ -375,21 +375,21 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
     // Move extract_root contents: copy `source_tree` -> `version_dir`
     copy_dir_all(&source_tree, &version_dir)?;
 
-    let bin_dir = windows_state::wax_bin_dir()?;
+    let bin_dir = windows_state::oil_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
     let mut copy_actions = Vec::new();
     for rel in &resolved.bin_paths {
         let src = join_under_root(&version_dir, rel)?;
         if !src.exists() {
-            return Err(WaxError::InstallError(format!(
+            return Err(OilError::InstallError(format!(
                 "Expected binary missing after extract: {}",
                 src.display()
             )));
         }
         let file_name = src
             .file_name()
-            .ok_or_else(|| WaxError::InstallError("Invalid bin path".into()))?;
+            .ok_or_else(|| OilError::InstallError("Invalid bin path".into()))?;
         let dest = bin_dir.join(file_name);
         copy_actions.push((src, dest));
     }
@@ -427,7 +427,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
 }
 
 fn wax_user_root() -> Result<PathBuf> {
-    windows_state::wax_windows_root()
+    windows_state::oil_windows_root()
 }
 
 fn resolved_staging_dir(package: &str, version: &str) -> Result<PathBuf> {

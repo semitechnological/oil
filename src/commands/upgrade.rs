@@ -6,7 +6,7 @@ use crate::commands::self_update::{self_update, Channel};
 use crate::commands::{install, uninstall};
 use crate::discovery::discover_manually_installed_casks;
 use crate::ecosystem_install;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{InstallMode, InstallState};
 use crate::signal::{
     check_cancelled, clear_active_multi, clear_current_op, set_active_multi, set_current_op,
@@ -14,7 +14,7 @@ use crate::signal::{
 };
 use crate::tap::TapManager;
 use crate::ui::{PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE, SPINNER_TICK_CHARS};
-use crate::version::{is_same_or_newer, WAX_VERSION};
+use crate::version::{is_same_or_newer, OIL_VERSION};
 use crate::windows_state;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -53,7 +53,7 @@ enum FormulaUpgradeMsg {
     Fallback(OutdatedPackage),
     DownloadFailed {
         name: String,
-        err: WaxError,
+        err: OilError,
     },
 }
 
@@ -89,7 +89,7 @@ pub async fn upgrade(cache: &Cache, packages: &[String], dry_run: bool) -> Resul
         let installed_casks = sync_cask_state(cache).await?;
         let mut failed_names = Vec::new();
         for package in packages {
-            if let Err(e) = if package == "wax" {
+            if let Err(e) = if package == "oil" {
                 upgrade_single(cache, package, dry_run).await
             } else if let Some(manifest) = windows_state::find_manifest(package)? {
                 upgrade_windows_package(cache, package, &manifest, dry_run).await
@@ -214,7 +214,7 @@ fn package_name_from_qualified_name(package_name: &str) -> &str {
     package_name.rsplit('/').next().unwrap_or(package_name)
 }
 
-fn cask_failed_names_from_error(err: &WaxError) -> HashSet<String> {
+fn cask_failed_names_from_error(err: &OilError) -> HashSet<String> {
     let message = err.to_string();
     message
         .strip_prefix("Install error: Some casks failed: ")
@@ -537,7 +537,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
     let platform_for_producer = platform.clone();
     let multi_for_producer = multi.clone();
     let producer_handle = tokio::spawn(async move {
-        let mut producer_js: JoinSet<std::result::Result<(), WaxError>> = JoinSet::new();
+        let mut producer_js: JoinSet<std::result::Result<(), OilError>> = JoinSet::new();
         for pkg in formula_packages_for_producer.iter().cloned() {
             let tx = producer_tx.clone();
             let sem = Arc::clone(&semaphore);
@@ -555,7 +555,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
             if formula_opt.is_none() {
                 producer_js.spawn(async move {
                     let _ = tx.send(FormulaUpgradeMsg::Fallback(pkg)).await;
-                    Ok::<(), WaxError>(())
+                    Ok::<(), OilError>(())
                 });
                 continue;
             }
@@ -563,14 +563,14 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
             let Some(bottle_info) = formula.bottle.as_ref().and_then(|b| b.stable.as_ref()) else {
                 producer_js.spawn(async move {
                     let _ = tx.send(FormulaUpgradeMsg::Fallback(pkg)).await;
-                    Ok::<(), WaxError>(())
+                    Ok::<(), OilError>(())
                 });
                 continue;
             };
             let Some(bottle_file) = bottle_info.file_for_platform(&platform_s) else {
                 producer_js.spawn(async move {
                     let _ = tx.send(FormulaUpgradeMsg::Fallback(pkg)).await;
-                    Ok::<(), WaxError>(())
+                    Ok::<(), OilError>(())
                 });
                 continue;
             };
@@ -610,7 +610,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                     let extract_dir = tmp.path().join(&name);
                     BottleDownloader::extract(&tarball, &extract_dir)?;
 
-                    Ok::<_, WaxError>(PreDownloaded {
+                    Ok::<_, OilError>(PreDownloaded {
                         name,
                         version,
                         extract_dir,
@@ -634,13 +634,13 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                             .await;
                     }
                 }
-                Ok::<(), WaxError>(())
+                Ok::<(), OilError>(())
             });
         }
 
         while let Some(task_res) = producer_js.join_next().await {
             task_res.map_err(|e| {
-                WaxError::InstallError(format!(
+                OilError::InstallError(format!(
                     "download worker failed before upgrade started: {}",
                     e
                 ))
@@ -656,7 +656,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
             pb.finish_and_clear();
         }
 
-        Ok::<(), WaxError>(())
+        Ok::<(), OilError>(())
     });
     drop(tx);
 
@@ -752,9 +752,9 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                 }
             }
             producer_handle.await.map_err(|e| {
-                WaxError::InstallError(format!("formula upgrade producer task: {}", e))
+                OilError::InstallError(format!("formula upgrade producer task: {}", e))
             })??;
-            Ok::<_, WaxError>((succ, fail, fails))
+            Ok::<_, OilError>((succ, fail, fails))
         }
     };
 
@@ -830,7 +830,7 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                     }
                 }
             }
-            Ok::<_, WaxError>((c_succ, c_fail, c_failed))
+            Ok::<_, OilError>((c_succ, c_fail, c_failed))
         }
     };
 
@@ -890,19 +890,19 @@ async fn upgrade_single(cache: &Cache, formula_name: &str, dry_run: bool) -> Res
             .cloned()
         {
             pkg
-        } else if formula_name == "wax" {
+        } else if formula_name == "oil" {
             if dry_run {
                 println!(
                     "{}: {} → latest (self-update)",
-                    style("wax").magenta(),
-                    style(WAX_VERSION).dim()
+                    style("oil").magenta(),
+                    style(OIL_VERSION).dim()
                 );
                 println!("\ndry run - no changes made");
                 return Ok(());
             }
             return self_update(Channel::Stable, false, None).await;
         } else {
-            return Err(WaxError::NotInstalled(formula_name.to_string()));
+            return Err(OilError::NotInstalled(formula_name.to_string()));
         }
     };
 
@@ -920,7 +920,7 @@ async fn upgrade_single(cache: &Cache, formula_name: &str, dry_run: bool) -> Res
     let formula = formulae
         .iter()
         .find(|f| f.name == formula_name || f.full_name == formula_name)
-        .ok_or_else(|| WaxError::FormulaNotFound(formula_name.to_string()))?;
+        .ok_or_else(|| OilError::FormulaNotFound(formula_name.to_string()))?;
 
     let latest_version = formula.full_version();
     let installed_version = &installed.version;
@@ -977,13 +977,13 @@ async fn upgrade_cask_single(cache: &Cache, cask_name: &str, dry_run: bool) -> R
 
     let installed = installed_casks
         .get(cask_name)
-        .ok_or_else(|| WaxError::NotInstalled(cask_name.to_string()))?;
+        .ok_or_else(|| OilError::NotInstalled(cask_name.to_string()))?;
 
     let casks = cache.load_casks().await?;
     let cask_summary = casks
         .iter()
         .find(|c| c.token == cask_name || c.full_token == cask_name)
-        .ok_or_else(|| WaxError::CaskNotFound(cask_name.to_string()))?;
+        .ok_or_else(|| OilError::CaskNotFound(cask_name.to_string()))?;
 
     let api_client = ApiClient::new();
     let cask_details = api_client.fetch_cask_details(&cask_summary.token).await?;

@@ -1,5 +1,5 @@
 use crate::api::Formula;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::formula_parser::FormulaParser;
 use crate::ui::dirs;
 use serde::{Deserialize, Serialize};
@@ -33,7 +33,7 @@ impl Tap {
                 if path.extension().and_then(|s| s.to_str()) == Some("rb") {
                     return Self::new_local_file(path);
                 } else {
-                    return Err(WaxError::TapError(
+                    return Err(OilError::TapError(
                         "Local file must have .rb extension".to_string(),
                     ));
                 }
@@ -43,7 +43,7 @@ impl Tap {
         }
 
         if expanded.starts_with("http://") {
-            return Err(WaxError::TapError(
+            return Err(OilError::TapError(
                 "Insecure tap URLs are not supported; use https://, git@, or a local path"
                     .to_string(),
             ));
@@ -58,7 +58,7 @@ impl Tap {
             return Self::new_github(parts[0], parts[1]);
         }
 
-        Err(WaxError::TapError(format!(
+        Err(OilError::TapError(format!(
             "Invalid tap specification: {}. Use 'user/repo', a Git URL, or a local path",
             spec
         )))
@@ -98,7 +98,7 @@ impl Tap {
         let name = canonicalized
             .file_name()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| WaxError::TapError("Invalid directory path".to_string()))?;
+            .ok_or_else(|| OilError::TapError("Invalid directory path".to_string()))?;
 
         Ok(Self {
             full_name: format!("local/{}", name),
@@ -114,7 +114,7 @@ impl Tap {
         let name = canonicalized
             .file_stem()
             .and_then(|s| s.to_str())
-            .ok_or_else(|| WaxError::TapError("Invalid file path".to_string()))?;
+            .ok_or_else(|| OilError::TapError("Invalid file path".to_string()))?;
 
         Ok(Self {
             full_name: format!("local/{}", name),
@@ -135,7 +135,7 @@ impl Tap {
     }
 
     fn tap_directory() -> Result<PathBuf> {
-        Ok(dirs::wax_dir()?.join("taps"))
+        Ok(dirs::oil_dir()?.join("taps"))
     }
 
     pub fn formula_dir(&self) -> PathBuf {
@@ -171,7 +171,7 @@ pub struct TapManager {
 
 impl TapManager {
     pub fn new() -> Result<Self> {
-        let state_path = dirs::wax_dir()?.join("taps.json");
+        let state_path = dirs::oil_dir()?.join("taps.json");
         Ok(Self {
             taps: HashMap::new(),
             state_path,
@@ -201,7 +201,7 @@ impl TapManager {
 
     fn migrate_legacy_taps(json: &str) -> Result<HashMap<String, Tap>> {
         let legacy: HashMap<String, serde_json::Value> = serde_json::from_str(json)
-            .map_err(|e| WaxError::CacheError(format!("Failed to parse taps.json: {}", e)))?;
+            .map_err(|e| OilError::CacheError(format!("Failed to parse taps.json: {}", e)))?;
 
         let mut taps = HashMap::new();
 
@@ -253,7 +253,7 @@ impl TapManager {
         let parent = self
             .state_path
             .parent()
-            .ok_or_else(|| WaxError::CacheError("Cannot determine parent directory".into()))?;
+            .ok_or_else(|| OilError::CacheError("Cannot determine parent directory".into()))?;
         fs::create_dir_all(parent).await?;
 
         let json = serde_json::to_string_pretty(&self.taps)?;
@@ -268,7 +268,7 @@ impl TapManager {
         let tap = Tap::from_spec(spec)?;
 
         if self.taps.contains_key(&tap.full_name) {
-            return Err(WaxError::TapError(format!(
+            return Err(OilError::TapError(format!(
                 "Tap {} is already added",
                 tap.full_name
             )));
@@ -277,7 +277,7 @@ impl TapManager {
         match &tap.kind {
             TapKind::GitHub { .. } | TapKind::Git { .. } => {
                 if tap.path.exists() {
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Tap directory {} already exists",
                         tap.path.display()
                     )));
@@ -287,7 +287,7 @@ impl TapManager {
             }
             TapKind::LocalDir { path } => {
                 if !path.exists() {
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Local directory does not exist: {}",
                         path.display()
                     )));
@@ -295,7 +295,7 @@ impl TapManager {
             }
             TapKind::LocalFile { path } => {
                 if !path.exists() {
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Local file does not exist: {}",
                         path.display()
                     )));
@@ -312,7 +312,7 @@ impl TapManager {
     #[instrument(skip(self))]
     async fn clone_tap(&self, tap: &Tap) -> Result<()> {
         let url = tap.url().ok_or_else(|| {
-            WaxError::TapError("Cannot clone tap without a valid URL".to_string())
+            OilError::TapError("Cannot clone tap without a valid URL".to_string())
         })?;
         debug!("Cloning tap from {}", url);
 
@@ -327,7 +327,7 @@ impl TapManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(WaxError::TapError(format!(
+            return Err(OilError::TapError(format!(
                 "Failed to clone tap: {}",
                 stderr
             )));
@@ -346,7 +346,7 @@ impl TapManager {
         let tap = self
             .taps
             .get(full_name)
-            .ok_or_else(|| WaxError::TapError(format!("Tap {} not found", full_name)))?
+            .ok_or_else(|| OilError::TapError(format!("Tap {} not found", full_name)))?
             .clone();
 
         match &tap.kind {
@@ -420,12 +420,12 @@ impl TapManager {
         let tap = self
             .taps
             .get(full_name)
-            .ok_or_else(|| WaxError::TapError(format!("Tap {} not found", full_name)))?;
+            .ok_or_else(|| OilError::TapError(format!("Tap {} not found", full_name)))?;
 
         match &tap.kind {
             TapKind::GitHub { .. } | TapKind::Git { .. } => {
                 if !tap.path.exists() {
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Tap directory does not exist: {}",
                         tap.path.display()
                     )));
@@ -439,7 +439,7 @@ impl TapManager {
 
                 if !fetch_output.status.success() {
                     let stderr = String::from_utf8_lossy(&fetch_output.stderr);
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Failed to fetch tap updates: {}",
                         stderr
                     )));
@@ -453,7 +453,7 @@ impl TapManager {
 
                 if !reset_output.status.success() {
                     let stderr = String::from_utf8_lossy(&reset_output.stderr);
-                    return Err(WaxError::TapError(format!(
+                    return Err(OilError::TapError(format!(
                         "Failed to update tap: {}",
                         stderr
                     )));

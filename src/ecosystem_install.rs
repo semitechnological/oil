@@ -3,7 +3,7 @@
 
 use crate::cache::Cache;
 use crate::chocolatey;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::package_spec::{Ecosystem, PackageSpec};
 use crate::scoop;
 use crate::winget_install;
@@ -40,7 +40,7 @@ pub async fn install_one_qualified(
             install_forced(eco, &spec.name, dry_run).await?;
             return Ok(true);
         }
-        return Err(WaxError::FormulaNotFound(format!(
+        return Err(OilError::FormulaNotFound(format!(
             "no matching package '{}' in brew index, Scoop Main, winget-pkgs, or Chocolatey",
             spec.name
         )));
@@ -56,17 +56,17 @@ pub async fn install_one_qualified(
 fn validate_qualified_inner(spec: &PackageSpec) -> Result<()> {
     let n = spec.name.trim();
     if n.is_empty() {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "empty package name after prefix".into(),
         ));
     }
     if spec.force.is_some() && n.contains('/') {
-        return Err(WaxError::InvalidInput(
+        return Err(OilError::InvalidInput(
             "names with '/' after a scoop/choco/winget/brew prefix are not supported".into(),
         ));
     }
     if !n.chars().all(|c| c.is_alphanumeric() || "-_.+".contains(c)) {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "unsupported characters in package id: {n}"
         )));
     }

@@ -2,7 +2,7 @@ use crate::bottle::homebrew_prefix;
 use crate::cache::Cache;
 use crate::cask::CaskState;
 use crate::commands::upgrade::{get_outdated_packages, upgrade as run_upgrade};
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::InstallState;
 use crate::windows_state;
 use console::style;
@@ -36,7 +36,7 @@ fn validate_cellar_path(path: &std::path::Path) -> Result<PathBuf> {
         .components()
         .any(|c| c == std::path::Component::ParentDir)
     {
-        return Err(WaxError::InvalidInput(format!(
+        return Err(OilError::InvalidInput(format!(
             "Cellar path contains parent-directory traversal: {}",
             path.display()
         )));
@@ -246,8 +246,8 @@ fn print_summary(total: usize, formula_count: usize, cask_count: usize, windows_
     );
 }
 
-fn map_inquire_err(e: inquire::error::InquireError) -> WaxError {
-    WaxError::InvalidInput(e.to_string())
+fn map_inquire_err(e: inquire::error::InquireError) -> OilError {
+    OilError::InvalidInput(e.to_string())
 }
 
 async fn offer_upgrade_for_selection(cache: &Cache, choice: &InstalledRow) -> Result<()> {

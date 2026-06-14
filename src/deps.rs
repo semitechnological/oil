@@ -1,5 +1,5 @@
 use crate::api::Formula;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use std::collections::{HashMap, HashSet, VecDeque};
 use tracing::{debug, instrument};
 
@@ -64,7 +64,7 @@ impl DependencyGraph {
         }
 
         if result.len() != in_degree.len() {
-            return Err(WaxError::DependencyCycle(
+            return Err(OilError::DependencyCycle(
                 "Circular dependency detected".to_string(),
             ));
         }
@@ -103,7 +103,7 @@ pub fn resolve_dependencies(
         let f = formulae
             .iter()
             .find(|f| f.name == name)
-            .ok_or_else(|| WaxError::FormulaNotFound(name.clone()))?;
+            .ok_or_else(|| OilError::FormulaNotFound(name.clone()))?;
 
         let deps = f.dependencies.clone().unwrap_or_default();
 

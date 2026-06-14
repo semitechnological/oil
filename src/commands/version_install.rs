@@ -1,6 +1,6 @@
 use crate::bottle::{detect_platform, should_prefer_source_build, BottleDownloader};
 use crate::cache::Cache;
-use crate::error::{Result, WaxError};
+use crate::error::{Result, OilError};
 use crate::install::{create_symlinks, InstallMode, InstallState, InstalledPackage};
 use crate::signal::check_cancelled;
 use crate::ui::{copy_dir_all, PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE};
@@ -38,7 +38,7 @@ async fn list_available_versions(
         .await?;
 
     if !resp.status().is_success() {
-        return Err(WaxError::VersionNotFound(format!(
+        return Err(OilError::VersionNotFound(format!(
             "Cannot list versions for {} (HTTP {})",
             formula_name,
             resp.status()
@@ -74,7 +74,7 @@ async fn resolve_bottle_for_platform(
         .await?;
 
     if !resp.status().is_success() {
-        return Err(WaxError::VersionNotFound(format!(
+        return Err(OilError::VersionNotFound(format!(
             "No manifest found for {}@{} (HTTP {})",
             formula_name,
             version,
@@ -85,7 +85,7 @@ async fn resolve_bottle_for_platform(
     let index: serde_json::Value = resp.json().await?;
 
     let manifests = index["manifests"].as_array().ok_or_else(|| {
-        WaxError::VersionNotFound(format!(
+        OilError::VersionNotFound(format!(
             "Invalid image index for {}@{}",
             formula_name, version
         ))
@@ -111,7 +111,7 @@ async fn resolve_bottle_for_platform(
     }
 
     let platform_manifest_digest = matched_digest.ok_or_else(|| {
-        WaxError::VersionNotFound(format!(
+        OilError::VersionNotFound(format!(
             "No bottle for {}@{} on {}.\nAvailable: {}",
             formula_name,
             version,
@@ -136,7 +136,7 @@ async fn resolve_bottle_for_platform(
         .await?;
 
     if !layer_resp.status().is_success() {
-        return Err(WaxError::VersionNotFound(format!(
+        return Err(OilError::VersionNotFound(format!(
             "Cannot fetch platform manifest for {}@{} (HTTP {})",
             formula_name,
             version,
@@ -147,21 +147,21 @@ async fn resolve_bottle_for_platform(
     let layer_manifest: serde_json::Value = layer_resp.json().await?;
 
     let layers = layer_manifest["layers"].as_array().ok_or_else(|| {
-        WaxError::VersionNotFound(format!(
+        OilError::VersionNotFound(format!(
             "Invalid layer manifest for {}@{}",
             formula_name, version
         ))
     })?;
 
     let layer = layers.first().ok_or_else(|| {
-        WaxError::VersionNotFound(format!(
+        OilError::VersionNotFound(format!(
             "No layers in manifest for {}@{}",
             formula_name, version
         ))
     })?;
 
     let digest = layer["digest"].as_str().ok_or_else(|| {
-        WaxError::VersionNotFound(format!(
+        OilError::VersionNotFound(format!(
             "No digest in layer manifest for {}@{}",
             formula_name, version
         ))
@@ -182,7 +182,7 @@ pub async fn version_install(
     global: bool,
 ) -> Result<()> {
     if should_prefer_source_build() {
-        return Err(WaxError::InstallError(
+        return Err(OilError::InstallError(
             "Versioned bottle installs are disabled on this Linux host. Use a source build or a non-versioned install.".to_string(),
         ));
     }
@@ -195,7 +195,7 @@ pub async fn version_install(
     formulae
         .iter()
         .find(|f| f.name == formula_name || f.full_name == formula_name)
-        .ok_or_else(|| WaxError::FormulaNotFound(formula_name.to_string()))?;
+        .ok_or_else(|| OilError::FormulaNotFound(formula_name.to_string()))?;
 
     let install_mode = match InstallMode::from_flags(user, global)? {
         Some(mode) => mode,
@@ -217,7 +217,7 @@ pub async fn version_install(
         .timeout(std::time::Duration::from_secs(60))
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
-        .map_err(WaxError::HttpError)?;
+        .map_err(OilError::HttpError)?;
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -241,7 +241,7 @@ pub async fn version_install(
         available.reverse();
         let show: Vec<&String> = available.iter().take(15).collect();
 
-        return Err(WaxError::VersionNotFound(format!(
+        return Err(OilError::VersionNotFound(format!(
             "Version {} not found for {}.\nAvailable versions: {}{}",
             version,
             formula_name,
@@ -307,7 +307,7 @@ pub async fn version_install(
             .await
             .or_else(|_| crate::sudo::sudo_remove(&formula_cellar).map(|_| ()))
             .map_err(|e| {
-                crate::error::WaxError::InstallError(format!(
+                crate::error::OilError::InstallError(format!(
                     "Failed to clean old version at {}: {}",
                     formula_cellar.display(),
                     e
@@ -318,7 +318,7 @@ pub async fn version_install(
         .await
         .or_else(|_| crate::sudo::sudo_mkdir(&formula_cellar))
         .map_err(|e| {
-            crate::error::WaxError::InstallError(format!(
+            crate::error::OilError::InstallError(format!(
                 "Failed to create cellar directory {}: {}",
                 formula_cellar.display(),
                 e
