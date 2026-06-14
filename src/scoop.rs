@@ -9,7 +9,8 @@
 
 use crate::bottle::BottleDownloader;
 use crate::error::{Result, WaxError};
-use crate::ui::dirs;
+use crate::package_spec::Ecosystem;
+use crate::windows_state::{self, WindowsPackageManifest};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use serde_json::Value;
@@ -374,9 +375,10 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
     // Move extract_root contents: copy `source_tree` -> `version_dir`
     copy_dir_all(&source_tree, &version_dir)?;
 
-    let bin_dir = wax_bin_dir()?;
+    let bin_dir = windows_state::wax_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
+    let mut bin_links = Vec::new();
     for rel in &resolved.bin_paths {
         let src = join_under_root(&version_dir, rel)?;
         if !src.exists() {
@@ -393,7 +395,21 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
             std::fs::remove_file(&dest)?;
         }
         std::fs::copy(&src, &dest)?;
+        bin_links.push(dest);
     }
+
+    let mut files = windows_state::collect_files(&version_dir)?;
+    files.extend(bin_links.iter().cloned());
+    WindowsPackageManifest::new(
+        Ecosystem::Scoop,
+        package,
+        resolved.version.clone(),
+        resolved.download_url.clone(),
+        version_dir.clone(),
+        bin_links,
+        files,
+    )
+    .save()?;
 
     println!(
         "Installed {} {} (Scoop manifest) — add to PATH if needed:\n  {}",
@@ -406,7 +422,7 @@ pub async fn install_from_bucket(package: &str, bucket_base: Option<&str>) -> Re
 }
 
 fn wax_user_root() -> Result<PathBuf> {
-    Ok(dirs::home_dir()?.join(".local").join("wax"))
+    windows_state::wax_windows_root()
 }
 
 fn resolved_staging_dir(package: &str, version: &str) -> Result<PathBuf> {
@@ -414,10 +430,6 @@ fn resolved_staging_dir(package: &str, version: &str) -> Result<PathBuf> {
         .join("scoop-apps")
         .join(package)
         .join(version))
-}
-
-fn wax_bin_dir() -> Result<PathBuf> {
-    Ok(wax_user_root()?.join("bin"))
 }
 
 pub(crate) fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {

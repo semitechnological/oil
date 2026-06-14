@@ -303,17 +303,6 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
     }
 
     print_remote_hits(&remote_hits);
-    if !remote_hits.is_empty()
-        && std::env::var("GITHUB_TOKEN")
-            .map(|v| v.is_empty())
-            .unwrap_or(true)
-    {
-        println!(
-            "\n{}",
-            style("Tip: set GITHUB_TOKEN for broader winget-pkgs code search in unified mode.")
-                .dim()
-        );
-    }
 
     Ok(())
 }

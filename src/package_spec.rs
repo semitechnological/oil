@@ -1,7 +1,9 @@
 //! Qualified package names: `scoop/ripgrep`, `choco/git`, `winget/JesseDuffield.lazygit`,
 //! `brew/openssl` (force Homebrew), or plain `ripgrep` for automatic source selection.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum Ecosystem {
     /// Local Homebrew-style index (fastest: cached JSON).
     Brew,

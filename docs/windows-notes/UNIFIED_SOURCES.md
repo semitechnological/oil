@@ -34,7 +34,7 @@ MSI/EXE/MSIX installers from winget or Chocolatey are **out of scope** for wax-m
 
 ## Search
 
-- **Unified** (no prefix): Homebrew + Scoop Main index (GitHub tree, cached 24h) + Chocolatey HTML search + optional winget GitHub **code search** if `GITHUB_TOKEN` is set.
+- **Unified** (no prefix): Homebrew + Scoop Main index (GitHub tree, cached 24h) + Chocolatey HTML search + winget-pkgs manifest index (git metadata cache, cached 24h). No `GITHUB_TOKEN` is required.
 - **Prefixed** (`scoop/foo`, …): Only that catalogue.
 
 ## Related files

@@ -3,12 +3,13 @@
 
 use crate::bottle::BottleDownloader;
 use crate::error::{Result, WaxError};
+use crate::package_spec::Ecosystem;
 use crate::scoop;
-use crate::ui::dirs;
 use crate::version;
+use crate::windows_state::{self, WindowsPackageManifest};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use tempfile::TempDir;
 use tracing::debug;
 
@@ -54,13 +55,7 @@ fn github_client() -> Result<reqwest::Client> {
 
 async fn gh_get_json(url: &str) -> Result<Vec<GhContentEntry>> {
     let client = github_client()?;
-    let mut req = client.get(url);
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        if !token.is_empty() {
-            req = req.header("Authorization", format!("Bearer {token}"));
-        }
-    }
-    let resp = req.send().await?;
+    let resp = client.get(url).send().await?;
     if !resp.status().is_success() {
         return Err(WaxError::InstallError(format!(
             "GitHub API {} -> HTTP {}",
@@ -98,6 +93,21 @@ fn winget_arch_token() -> &'static str {
         "x86" => "x86",
         _ => "x64",
     }
+}
+
+fn join_under_root(root: &Path, rel: &Path) -> Result<PathBuf> {
+    for component in rel.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(WaxError::InstallError(format!(
+                    "Unsafe path in winget manifest: {}",
+                    rel.display()
+                )));
+            }
+        }
+    }
+    Ok(root.join(rel))
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,16 +233,17 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     std::fs::create_dir_all(&extract_root)?;
     scoop::extract_zip_file(&archive_path, &extract_root)?;
 
-    let bin_dir = dirs::home_dir()?.join(".local").join("wax").join("bin");
+    let bin_dir = windows_state::wax_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
     let nested_files = doc.nested_installer_files.as_ref().ok_or_else(|| {
         WaxError::InstallError("winget manifest missing NestedInstallerFiles".into())
     })?;
 
+    let mut bin_links = Vec::new();
     for nf in nested_files {
         let rel = PathBuf::from(nf.relative_file_path.replace('\\', "/"));
-        let src = extract_root.join(&rel);
+        let src = join_under_root(&extract_root, &rel)?;
         if !src.exists() {
             return Err(WaxError::InstallError(format!(
                 "nested portable file missing: {}",
@@ -253,11 +264,10 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
             let _ = std::fs::remove_file(&dest);
         }
         std::fs::copy(&src, &dest)?;
+        bin_links.push(dest);
     }
 
-    let staging = dirs::home_dir()?
-        .join(".local")
-        .join("wax")
+    let staging = windows_state::wax_windows_root()?
         .join("winget-apps")
         .join(package_id.replace('.', "_"))
         .join(&latest);
@@ -266,6 +276,19 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     }
     std::fs::create_dir_all(staging.parent().unwrap())?;
     scoop::copy_dir_all(&extract_root, &staging)?;
+
+    let mut files = windows_state::collect_files(&staging)?;
+    files.extend(bin_links.iter().cloned());
+    WindowsPackageManifest::new(
+        Ecosystem::Winget,
+        package_id,
+        latest.clone(),
+        inst.installer_url.clone(),
+        staging,
+        bin_links,
+        files,
+    )
+    .save()?;
 
     println!(
         "Installed {} {} (winget portable zip) — binaries under:\n  {}",

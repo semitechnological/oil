@@ -4,8 +4,9 @@
 
 use crate::bottle::BottleDownloader;
 use crate::error::{Result, WaxError};
+use crate::package_spec::Ecosystem;
 use crate::scoop;
-use crate::ui::dirs;
+use crate::windows_state::{self, WindowsPackageManifest};
 use indicatif::{ProgressBar, ProgressStyle};
 use regex::Regex;
 use std::path::{Path, PathBuf};
@@ -111,12 +112,10 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
         ));
     }
 
-    let bin_dir = dirs::home_dir()?.join(".local").join("wax").join("bin");
+    let bin_dir = windows_state::wax_bin_dir()?;
     std::fs::create_dir_all(&bin_dir)?;
 
-    let staging = dirs::home_dir()?
-        .join(".local")
-        .join("wax")
+    let staging = windows_state::wax_windows_root()?
         .join("choco-apps")
         .join(id);
     if staging.exists() {
@@ -124,6 +123,7 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
     }
     scoop::copy_dir_all(&tools_dir, &staging)?;
 
+    let mut bin_links = Vec::new();
     for src in &exes {
         let file_name = src
             .file_name()
@@ -133,7 +133,21 @@ pub async fn install_portable_tools(id: &str) -> Result<()> {
             let _ = std::fs::remove_file(&dest);
         }
         std::fs::copy(src, &dest)?;
+        bin_links.push(dest);
     }
+
+    let mut files = windows_state::collect_files(&staging)?;
+    files.extend(bin_links.iter().cloned());
+    WindowsPackageManifest::new(
+        Ecosystem::Chocolatey,
+        id,
+        "latest",
+        nupkg_url,
+        staging,
+        bin_links,
+        files,
+    )
+    .save()?;
 
     println!(
         "Installed {} from Chocolatey .nupkg (tools/*.exe) — binaries under:\n  {}",

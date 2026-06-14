@@ -1,5 +1,5 @@
 //! Unified search across Homebrew index (existing), Scoop Main bucket listing,
-//! Chocolatey web search, and optional GitHub code search for winget-pkgs.
+//! Chocolatey web search, and cached winget-pkgs manifest discovery.
 
 use crate::cache::Cache;
 use crate::chocolatey;
@@ -8,17 +8,26 @@ use crate::package_spec::Ecosystem;
 use console::style;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::process::Command;
 use tracing::debug;
 
 const SCOOP_INDEX_CACHE: &str = "scoop_main_index.json";
+const WINGET_INDEX_CACHE: &str = "winget_pkgs_index.json";
 const SCOOP_INDEX_MAX_AGE_SECS: i64 = 86_400;
+const WINGET_INDEX_MAX_AGE_SECS: i64 = 86_400;
 
 #[derive(Serialize, Deserialize)]
 struct ScoopIndexFile {
     fetched_unix: i64,
     names: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WingetIndexFile {
+    fetched_unix: i64,
+    ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -68,14 +77,10 @@ async fn load_or_fetch_scoop_index(cache_dir: &std::path::Path) -> Result<Vec<St
         .build()
         .map_err(|e| crate::error::WaxError::InstallError(e.to_string()))?;
 
-    let mut req =
-        client.get("https://api.github.com/repos/ScoopInstaller/Main/git/trees/master?recursive=1");
-    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        if !token.is_empty() {
-            req = req.header("Authorization", format!("Bearer {token}"));
-        }
-    }
-    let resp = req.send().await?;
+    let resp = client
+        .get("https://api.github.com/repos/ScoopInstaller/Main/git/trees/master?recursive=1")
+        .send()
+        .await?;
     if !resp.status().is_success() {
         return Err(crate::error::WaxError::InstallError(format!(
             "Scoop index GitHub API: HTTP {}",
@@ -115,16 +120,6 @@ async fn load_or_fetch_scoop_index(cache_dir: &std::path::Path) -> Result<Vec<St
     Ok(names)
 }
 
-#[derive(Deserialize)]
-struct GhCodeSearch {
-    items: Vec<GhCodeItem>,
-}
-
-#[derive(Deserialize)]
-struct GhCodeItem {
-    path: String,
-}
-
 fn package_id_from_winget_manifest_path(path: &str) -> Option<String> {
     let parts: Vec<&str> = path.split('/').collect();
     let mpos = parts.iter().position(|p| *p == "manifests")?;
@@ -136,7 +131,7 @@ fn package_id_from_winget_manifest_path(path: &str) -> Option<String> {
         return None;
     }
     let file = tail.last()?;
-    if !file.ends_with(".yaml") {
+    if !file.ends_with(".installer.yaml") {
         return None;
     }
     let version_dir = tail.get(tail.len().saturating_sub(2))?;
@@ -155,53 +150,122 @@ fn looks_like_version_folder(s: &str) -> bool {
     b.first().map(|c| c.is_ascii_digit()).unwrap_or(false)
 }
 
-async fn search_winget_github(query: &str, limit: usize) -> Result<Vec<RemoteHit>> {
-    let Ok(token) = std::env::var("GITHUB_TOKEN") else {
-        return Ok(vec![]);
-    };
-    if token.is_empty() {
-        return Ok(vec![]);
+async fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String> {
+    let mut command = Command::new("git");
+    command.args(args);
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
     }
+    let output = command
+        .output()
+        .await
+        .map_err(|e| crate::error::WaxError::InstallError(format!("git failed: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let detail = if stderr.is_empty() {
+            format!("exit status {}", output.status)
+        } else {
+            stderr
+        };
+        return Err(crate::error::WaxError::InstallError(format!(
+            "git {} failed: {detail}",
+            args.join(" ")
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
 
-    let q = format!(
-        "{}+filename:installer.yaml+repo:microsoft/winget-pkgs+path:/manifests/",
-        urlencoding::encode(query)
-    );
-    let url = format!("https://api.github.com/search/code?q={q}&per_page={limit}");
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .user_agent(concat!(
-            "wax/",
-            env!("CARGO_PKG_VERSION"),
-            " (winget-search)"
-        ))
-        .build()
-        .map_err(|e| crate::error::WaxError::InstallError(e.to_string()))?;
-
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
+async fn refresh_winget_index_from_git(cache_dir: &Path) -> Result<Vec<String>> {
+    let repo_dir = cache_dir.join("winget-pkgs.git");
+    let repo = repo_dir.to_string_lossy().to_string();
+    if !repo_dir.join("HEAD").exists() {
+        if let Some(parent) = repo_dir.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        debug!("Cloning winget-pkgs metadata into cache...");
+        run_git(
+            &[
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                "--depth=1",
+                "https://github.com/microsoft/winget-pkgs.git",
+                &repo,
+            ],
+            None,
+        )
         .await?;
-    if !resp.status().is_success() {
-        return Ok(vec![]);
+    } else {
+        debug!("Refreshing cached winget-pkgs metadata...");
+        run_git(&["fetch", "--depth=1", "origin", "master"], Some(&repo_dir)).await?;
     }
-    let parsed: GhCodeSearch = resp.json().await?;
+
+    let stdout = run_git(
+        &["ls-tree", "-r", "--name-only", "origin/master", "manifests"],
+        Some(&repo_dir),
+    )
+    .await?;
+    let mut ids: Vec<String> = stdout
+        .lines()
+        .filter_map(package_id_from_winget_manifest_path)
+        .collect();
+    ids.sort_by_key(|id| id.to_ascii_lowercase());
+    ids.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    Ok(ids)
+}
+
+async fn load_or_fetch_winget_index(cache_dir: &Path) -> Result<Vec<String>> {
+    let path: PathBuf = cache_dir.join(WINGET_INDEX_CACHE);
+    let stale = tokio::fs::read_to_string(&path)
+        .await
+        .ok()
+        .and_then(|text| serde_json::from_str::<WingetIndexFile>(&text).ok());
+    if let Some(idx) = &stale {
+        if now_unix() - idx.fetched_unix < WINGET_INDEX_MAX_AGE_SECS {
+            return Ok(idx.ids.clone());
+        }
+    }
+
+    let ids = match refresh_winget_index_from_git(cache_dir).await {
+        Ok(ids) => ids,
+        Err(err) => {
+            if let Some(idx) = stale {
+                debug!("Using stale winget-pkgs index after refresh failed: {err}");
+                return Ok(idx.ids);
+            }
+            return Err(err);
+        }
+    };
+
+    let idx = WingetIndexFile {
+        fetched_unix: now_unix(),
+        ids: ids.clone(),
+    };
+    if let Ok(encoded) = serde_json::to_string_pretty(&idx) {
+        let _ = tokio::fs::write(&path, encoded).await;
+    }
+    Ok(ids)
+}
+
+async fn search_winget_index(
+    cache_dir: &std::path::Path,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<RemoteHit>> {
+    let index = load_or_fetch_winget_index(cache_dir).await?;
     let mut out = Vec::new();
-    for item in parsed.items {
-        if let Some(id) = package_id_from_winget_manifest_path(&item.path) {
-            let score = match_score_token(&id, query).unwrap_or(400);
+    for id in index {
+        if let Some(score) = match_score_token(&id, query) {
             out.push(RemoteHit {
                 ecosystem: Ecosystem::Winget,
                 id,
-                blurb: Some(item.path),
+                blurb: None,
                 score,
             });
         }
-        if out.len() >= limit {
-            break;
-        }
     }
+    out.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
+    out.truncate(limit);
     Ok(out)
 }
 
@@ -246,7 +310,7 @@ pub async fn collect_remote_hits(
     }
 
     if include_winget {
-        hits.extend(search_winget_github(q, 15).await?);
+        hits.extend(search_winget_index(cache.cache_dir_path(), q, 15).await?);
     }
 
     Ok(hits)
@@ -360,5 +424,21 @@ mod tests {
         let d = dedupe_remote_by_speed(hits);
         assert_eq!(d.len(), 1);
         assert_eq!(d[0].ecosystem, Ecosystem::Winget);
+    }
+
+    #[test]
+    fn winget_manifest_path_yields_package_id() {
+        let path = "manifests/j/JesseDuffield/lazygit/0.55.1/JesseDuffield.lazygit.installer.yaml";
+        assert_eq!(
+            package_id_from_winget_manifest_path(path).as_deref(),
+            Some("JesseDuffield.lazygit")
+        );
+    }
+
+    #[test]
+    fn winget_manifest_path_rejects_non_installer_yaml() {
+        let path =
+            "manifests/j/JesseDuffield/lazygit/0.55.1/JesseDuffield.lazygit.locale.en-US.yaml";
+        assert_eq!(package_id_from_winget_manifest_path(path), None);
     }
 }

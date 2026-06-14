@@ -23,6 +23,7 @@ mod tap;
 mod timing;
 mod ui;
 mod version;
+mod windows_state;
 mod winget_install;
 
 use api::ApiClient;
