@@ -71,7 +71,11 @@ impl DistroInfo {
 
 fn detect_format(id: &str, id_like: &str) -> PackageFormat {
     let id = id.to_lowercase();
-    let like = id_like.to_lowercase();
+    let like: Vec<String> = id_like
+        .to_lowercase()
+        .split_whitespace()
+        .map(ToString::to_string)
+        .collect();
 
     let deb_ids = [
         "debian",
@@ -88,18 +92,32 @@ fn detect_format(id: &str, id_like: &str) -> PackageFormat {
     let pacman_ids = ["arch", "manjaro", "endeavouros", "garuda", "artix"];
     let apk_ids = ["alpine"];
 
-    if deb_ids.iter().any(|d| id.contains(d) || like.contains(d)) {
+    if matches_distro(&id, &like, &deb_ids) {
         PackageFormat::Deb
-    } else if rpm_ids.iter().any(|d| id.contains(d) || like.contains(d)) {
+    } else if matches_distro(&id, &like, &rpm_ids) {
         PackageFormat::Rpm
-    } else if pacman_ids
-        .iter()
-        .any(|d| id.contains(d) || like.contains(d))
-    {
+    } else if matches_distro(&id, &like, &pacman_ids) {
         PackageFormat::Pacman
-    } else if apk_ids.iter().any(|d| id.contains(d) || like.contains(d)) {
+    } else if matches_distro(&id, &like, &apk_ids) {
         PackageFormat::Apk
     } else {
         PackageFormat::Other
+    }
+}
+
+fn matches_distro(id: &str, like: &[String], known: &[&str]) -> bool {
+    known
+        .iter()
+        .any(|distro| id == *distro || like.iter().any(|token| token == distro))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_format_uses_exact_id_like_tokens() {
+        assert_eq!(detect_format("notdebian", ""), PackageFormat::Other);
+        assert_eq!(detect_format("mint", "ubuntu debian"), PackageFormat::Deb);
     }
 }

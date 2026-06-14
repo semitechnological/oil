@@ -15,18 +15,23 @@ pub struct AptRegistry {
 }
 
 impl AptRegistry {
+    #[allow(dead_code)]
     pub fn new(mirror: &str, suite: &str) -> Self {
+        Self::new_with_components(mirror, suite, vec!["main".to_string()])
+    }
+
+    fn new_with_components(mirror: &str, suite: &str, components: Vec<String>) -> Self {
         let arch = std::env::consts::ARCH;
         let deb_arch = match arch {
             "x86_64" => "amd64",
             "aarch64" => "arm64",
             "arm" => "armhf",
-            _ => "amd64",
+            other => other,
         };
         Self {
             mirror: mirror.to_string(),
             suite: suite.to_string(),
-            components: vec!["main".to_string(), "universe".to_string()],
+            components,
             arch: deb_arch.to_string(),
         }
     }
@@ -40,19 +45,47 @@ impl AptRegistry {
 
     pub fn ubuntu_default() -> Self {
         let suite = debian_suite_from_os_release().unwrap_or_else(|| "noble".to_string());
-        Self::new("http://archive.ubuntu.com/ubuntu", &suite)
+        let mirror = match std::env::consts::ARCH {
+            "x86_64" => "http://archive.ubuntu.com/ubuntu",
+            _ => "http://ports.ubuntu.com/ubuntu-ports",
+        };
+        Self::new_with_components(
+            mirror,
+            &suite,
+            vec![
+                "main".to_string(),
+                "restricted".to_string(),
+                "universe".to_string(),
+                "multiverse".to_string(),
+            ],
+        )
     }
 
     #[allow(dead_code)]
     pub fn debian_default() -> Self {
         let suite = debian_suite_from_os_release().unwrap_or_else(|| "bookworm".to_string());
-        Self::new("http://deb.debian.org/debian", &suite)
+        Self::new_with_components(
+            "http://deb.debian.org/debian",
+            &suite,
+            vec![
+                "main".to_string(),
+                "contrib".to_string(),
+                "non-free".to_string(),
+                "non-free-firmware".to_string(),
+            ],
+        )
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
         let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
-        Ok(dir.join(format!("apt-{}.json", self.suite)))
+        Ok(dir.join(format!(
+            "apt-{}-{}-{}-{}.json",
+            cache_key(&self.mirror),
+            cache_key(&self.suite),
+            cache_key(&self.components.join(",")),
+            cache_key(&self.arch)
+        )))
     }
 
     fn is_cache_fresh(path: &std::path::Path) -> bool {
@@ -178,6 +211,13 @@ impl AptRegistry {
             packages: all_packages,
         })
     }
+}
+
+fn cache_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn debian_suite_from_os_release() -> Option<String> {
@@ -358,10 +398,13 @@ pub(crate) fn parse_packages_file(content: &str, mirror: &str) -> Vec<PackageMet
                 "Depends" => {
                     for dep in val.split(',') {
                         let dep = dep.trim();
-                        // Handle alternatives with |
-                        let primary = dep.split('|').next().unwrap_or(dep).trim();
-                        if !primary.is_empty() {
-                            depends.push(super::parse_dep_name(primary).to_string());
+                        let alternatives: Vec<String> = dep
+                            .split('|')
+                            .map(|alt| super::parse_dep_name(alt.trim()).to_string())
+                            .filter(|alt| !alt.is_empty())
+                            .collect();
+                        if !alternatives.is_empty() {
+                            depends.push(alternatives.join(" | "));
                         }
                     }
                 }

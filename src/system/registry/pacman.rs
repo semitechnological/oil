@@ -16,15 +16,10 @@ pub struct PacmanRegistry {
 impl PacmanRegistry {
     pub fn new(mirror: &str) -> Self {
         let arch = std::env::consts::ARCH;
-        let pacman_arch = match arch {
-            "x86_64" => "x86_64",
-            "aarch64" => "aarch64",
-            _ => "x86_64",
-        };
         Self {
             mirror: mirror.to_string(),
             repos: vec!["core".to_string(), "extra".to_string()],
-            arch: pacman_arch.to_string(),
+            arch: arch.to_string(),
         }
     }
 
@@ -35,7 +30,12 @@ impl PacmanRegistry {
     fn cache_path(&self, repo: &str) -> Result<std::path::PathBuf> {
         let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
-        Ok(dir.join(format!("pacman-{}.json", repo)))
+        Ok(dir.join(format!(
+            "pacman-{}-{}-{}.json",
+            cache_key(&self.mirror),
+            cache_key(repo),
+            cache_key(&self.arch)
+        )))
     }
 
     fn is_cache_fresh(path: &std::path::Path) -> bool {
@@ -103,6 +103,13 @@ impl PacmanRegistry {
             packages: all_packages,
         })
     }
+}
+
+fn cache_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn parse_pacman_db(

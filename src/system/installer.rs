@@ -15,6 +15,7 @@ use tokio::sync::Semaphore;
 use tracing::debug;
 
 type PackageManifestData = (usize, String, String, PathBuf, Vec<PathBuf>, Vec<PathBuf>);
+type PackageDownloadData = (usize, String, String, PathBuf);
 
 pub struct SystemInstaller {
     downloader: Arc<BottleDownloader>,
@@ -95,7 +96,6 @@ impl SystemInstaller {
 
             let dl = Arc::clone(&self.downloader);
             let sem = Arc::clone(&semaphore);
-            let prefix_buf = prefix.to_path_buf();
             let pb_clone = pb.clone();
 
             tasks.push(tokio::spawn(async move {
@@ -131,37 +131,19 @@ impl SystemInstaller {
                     }
                 }
 
-                // Extract package and track files.
-                let (mut files, dirs) = extract_package_tracked(&dest, &prefix_buf)?;
-                wrap_prefix_commands(&prefix_buf, &mut files)?;
-                debug!("Extracted {} to {:?}", pkg_name, prefix_buf);
-
-                Ok::<PackageManifestData, WaxError>((
-                    index,
-                    pkg_name,
-                    pkg_version,
-                    dest,
-                    files,
-                    dirs,
-                ))
+                Ok::<PackageDownloadData, WaxError>((index, pkg_name, pkg_version, dest))
             }));
         }
 
         let mut installed = Vec::new();
+        let mut downloads: Vec<PackageDownloadData> = Vec::new();
         let mut manifest_data: Vec<PackageManifestData> = Vec::new();
 
         let mut failures = Vec::new();
         for task in tasks {
             match task.await {
-                Ok(Ok((index, name, version, package_path, files, dirs))) => {
-                    manifest_data.push((
-                        index,
-                        name.clone(),
-                        version.clone(),
-                        package_path,
-                        files,
-                        dirs,
-                    ));
+                Ok(Ok((index, name, version, package_path))) => {
+                    downloads.push((index, name.clone(), version.clone(), package_path));
                     installed.push((name, version));
                 }
                 Ok(Err(e)) => failures.push(e.to_string()),
@@ -182,7 +164,21 @@ impl SystemInstaller {
             )));
         }
 
+        downloads.sort_by_key(|(index, _, _, _)| *index);
+        for (index, name, version, package_path) in downloads {
+            let (files, dirs) = extract_package_tracked(&package_path, prefix)?;
+            debug!("Extracted {} to {:?}", name, prefix);
+            manifest_data.push((index, name, version, package_path, files, dirs));
+        }
+
         manifest_data.sort_by_key(|(index, _, _, _, _, _)| *index);
+        let all_files: Vec<PathBuf> = manifest_data
+            .iter()
+            .flat_map(|(_, _, _, _, files, _)| files.iter().cloned())
+            .collect();
+        for (_, _, _, _, files, _) in &mut manifest_data {
+            wrap_prefix_commands(prefix, files, &all_files)?;
+        }
 
         if run_scripts {
             for (_, name, _, package_path, _, _) in &manifest_data {
@@ -247,33 +243,62 @@ impl SystemInstaller {
     }
 }
 
-fn wrap_prefix_commands(prefix: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
-    let bin_dir = prefix.join("usr").join("bin");
-    let lib_dir = prefix.join("usr").join("lib");
-    let lib64_dir = prefix.join("usr").join("lib64");
-    let real_dir = prefix.join(".wax-real").join("usr").join("bin");
+fn wrap_prefix_commands(
+    prefix: &Path,
+    files: &mut Vec<PathBuf>,
+    library_files: &[PathBuf],
+) -> Result<()> {
+    if prefix == Path::new("/") {
+        return Ok(());
+    }
+
+    let executable_dirs = [
+        PathBuf::from("bin"),
+        PathBuf::from("sbin"),
+        PathBuf::from("usr/bin"),
+        PathBuf::from("usr/sbin"),
+    ];
+    let library_dirs = prefix_library_dirs(prefix, library_files);
+    if library_dirs.is_empty() {
+        return Ok(());
+    }
+    let ld_library_path = library_dirs
+        .iter()
+        .map(|path| shell_quote(&path.to_string_lossy()))
+        .collect::<Vec<_>>()
+        .join(":");
+    let real_root = prefix.join(".wax-real");
 
     let mut additions = Vec::new();
     for file in files.iter() {
-        if file.parent() != Some(bin_dir.as_path()) || !is_elf(file)? {
+        if std::fs::symlink_metadata(file)?.file_type().is_symlink() {
+            continue;
+        }
+        let Ok(relative) = file.strip_prefix(prefix) else {
+            continue;
+        };
+        let Some(parent) = relative.parent() else {
+            continue;
+        };
+        if !executable_dirs.iter().any(|dir| dir == parent) || !is_elf(file)? {
             continue;
         }
 
-        std::fs::create_dir_all(&real_dir)?;
-        let Some(name) = file.file_name() else {
+        let real_path = real_root.join(relative);
+        let Some(real_dir) = real_path.parent() else {
             continue;
         };
-        let real_path = real_dir.join(name);
+        std::fs::create_dir_all(real_dir)?;
         if real_path.exists() {
             std::fs::remove_file(&real_path)?;
         }
         std::fs::rename(file, &real_path)?;
 
         let script = format!(
-            "#!/bin/sh\nexport LD_LIBRARY_PATH=\"{}:{}:${{LD_LIBRARY_PATH:-}}\"\nexec \"{}\" \"$@\"\n",
-            lib_dir.display(),
-            lib64_dir.display(),
-            real_path.display()
+            "#!/bin/sh\nif [ -n \"${{LD_LIBRARY_PATH:-}}\" ]; then\n  export LD_LIBRARY_PATH={}:\"$LD_LIBRARY_PATH\"\nelse\n  export LD_LIBRARY_PATH={}\nfi\nexec {} \"$@\"\n",
+            ld_library_path,
+            ld_library_path,
+            shell_quote(&real_path.to_string_lossy())
         );
         let mut wrapper = std::fs::File::create(file)?;
         wrapper.write_all(script.as_bytes())?;
@@ -291,6 +316,38 @@ fn wrap_prefix_commands(prefix: &Path, files: &mut Vec<PathBuf>) -> Result<()> {
 
     files.extend(additions);
     Ok(())
+}
+
+fn prefix_library_dirs(prefix: &Path, files: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for file in files {
+        let Some(parent) = file.parent() else {
+            continue;
+        };
+        let Ok(relative_parent) = parent.strip_prefix(prefix) else {
+            continue;
+        };
+        if !relative_parent
+            .components()
+            .any(|component| component.as_os_str() == "lib" || component.as_os_str() == "lib64")
+        {
+            continue;
+        }
+        let Some(name) = file.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.contains(".so") {
+            continue;
+        }
+        if !dirs.iter().any(|dir| dir == parent) {
+            dirs.push(parent.to_path_buf());
+        }
+    }
+    dirs
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn is_elf(path: &Path) -> Result<bool> {
@@ -335,5 +392,62 @@ mod tests {
 
         assert_eq!(SystemInstaller::install_prefix(), prefix);
         std::env::remove_var("WAX_SYSTEM_PREFIX");
+    }
+
+    #[test]
+    fn wrapper_handles_multiple_command_and_library_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path().join("prefix with space");
+        let command = prefix.join("bin/tool");
+        let library = prefix.join("usr/lib/x86_64-linux-gnu/libthing.so.1");
+        std::fs::create_dir_all(command.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(library.parent().unwrap()).unwrap();
+        std::fs::write(&command, b"\x7fELFpayload").unwrap();
+        std::fs::write(&library, b"library").unwrap();
+        let mut files = vec![command.clone(), library.clone()];
+
+        let library_files = files.clone();
+        wrap_prefix_commands(&prefix, &mut files, &library_files).unwrap();
+
+        let real = prefix.join(".wax-real/bin/tool");
+        assert!(real.exists());
+        assert!(files.contains(&real));
+        let wrapper = std::fs::read_to_string(&command).unwrap();
+        assert!(wrapper.contains("'"));
+        assert!(wrapper.contains("usr/lib/x86_64-linux-gnu"));
+        assert!(wrapper.contains(".wax-real/bin/tool"));
+    }
+
+    #[test]
+    fn wrapper_skips_root_prefix() {
+        let mut files = vec![PathBuf::from("/usr/bin/tool")];
+        let library_files = files.clone();
+        wrap_prefix_commands(Path::new("/"), &mut files, &library_files).unwrap();
+        assert_eq!(files, vec![PathBuf::from("/usr/bin/tool")]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wrapper_skips_symlinked_commands() {
+        let tmp = TempDir::new().unwrap();
+        let prefix = tmp.path().join("prefix");
+        let command = prefix.join("usr/bin/tool");
+        let target = prefix.join("usr/lib/tool-real");
+        let library = prefix.join("usr/lib/libthing.so.1");
+        std::fs::create_dir_all(command.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, b"\x7fELFpayload").unwrap();
+        std::fs::write(&library, b"library").unwrap();
+        std::os::unix::fs::symlink("../lib/tool-real", &command).unwrap();
+        let mut files = vec![command.clone(), target, library];
+
+        let library_files = files.clone();
+        wrap_prefix_commands(&prefix, &mut files, &library_files).unwrap();
+
+        assert!(std::fs::symlink_metadata(&command)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!prefix.join(".wax-real/usr/bin/tool").exists());
     }
 }

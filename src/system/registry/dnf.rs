@@ -27,6 +27,16 @@ impl DnfRegistry {
         ))
     }
 
+    pub fn default_for_host() -> Result<Self> {
+        let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+        if rpm_family_from_os_release(&os_release).as_deref() == Some("fedora") {
+            return Ok(Self::fedora_default());
+        }
+        Err(WaxError::PlatformNotSupported(
+            "wax system registry install currently supports Fedora-compatible RPM repositories; this RPM distro needs repo-file parsing first".into(),
+        ))
+    }
+
     fn cache_path(&self) -> Result<std::path::PathBuf> {
         let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
@@ -171,6 +181,28 @@ fn rpm_arch() -> Option<String> {
         "arm64" => Some("aarch64".to_string()),
         _ if !arch.is_empty() => Some(arch),
         _ => None,
+    }
+}
+
+fn rpm_family_from_os_release(os_release: &str) -> Option<String> {
+    let mut id = None;
+    let mut like = Vec::new();
+    for line in os_release.lines() {
+        if let Some(value) = line.strip_prefix("ID=") {
+            id = Some(value.trim_matches('"').to_ascii_lowercase());
+        } else if let Some(value) = line.strip_prefix("ID_LIKE=") {
+            like = value
+                .trim_matches('"')
+                .to_ascii_lowercase()
+                .split_whitespace()
+                .map(ToString::to_string)
+                .collect();
+        }
+    }
+    if id.as_deref() == Some("fedora") || like.iter().any(|token| token == "fedora") {
+        Some("fedora".to_string())
+    } else {
+        id
     }
 }
 
@@ -478,5 +510,17 @@ mod tests {
         assert_eq!(pkg.sha256.as_deref(), Some("abc123"));
         assert_eq!(pkg.depends, vec!["libc.so.6()(64bit)"]);
         assert_eq!(pkg.provides, vec!["rg", "ripgrep"]);
+    }
+
+    #[test]
+    fn rpm_family_detects_fedora_like_only() {
+        assert_eq!(
+            rpm_family_from_os_release("ID=ultramarine\nID_LIKE=\"fedora\"\n").as_deref(),
+            Some("fedora")
+        );
+        assert_eq!(
+            rpm_family_from_os_release("ID=rocky\nID_LIKE=\"rhel centos\"\n").as_deref(),
+            Some("rocky")
+        );
     }
 }

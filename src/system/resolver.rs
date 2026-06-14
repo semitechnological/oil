@@ -1,10 +1,16 @@
 use crate::error::{Result, WaxError};
 use crate::system::registry::{parse_dep_name, PackageIndex, PackageMetadata};
 use std::collections::HashSet;
-use tracing::warn;
 
 pub struct Resolver<'a> {
     index: &'a PackageIndex,
+}
+
+struct ResolveState<'a> {
+    visited: HashSet<String>,
+    pushed: HashSet<String>,
+    result: Vec<&'a PackageMetadata>,
+    missing_deps: Vec<String>,
 }
 
 impl<'a> Resolver<'a> {
@@ -27,22 +33,20 @@ impl<'a> Resolver<'a> {
     where
         F: Fn(&str) -> bool,
     {
-        let mut visited: HashSet<String> = HashSet::new();
-        let mut pushed: HashSet<String> = HashSet::new();
-        let mut result: Vec<&'a PackageMetadata> = Vec::new();
+        let mut state = ResolveState {
+            visited: HashSet::new(),
+            pushed: HashSet::new(),
+            result: Vec::new(),
+            missing_deps: Vec::new(),
+        };
         let mut missing_requested = Vec::new();
 
         for pkg in packages {
             let name = parse_dep_name(pkg).to_string();
             if self
-                .visit(
-                    &name,
-                    true,
-                    &dep_satisfied,
-                    &mut visited,
-                    &mut pushed,
-                    &mut result,
-                )
+                .visit(&name, true, &dep_satisfied, &mut state)
+                .ok()
+                .flatten()
                 .is_none()
             {
                 missing_requested.push(pkg.clone());
@@ -61,7 +65,16 @@ impl<'a> Resolver<'a> {
             )));
         }
 
-        Ok(result)
+        if !state.missing_deps.is_empty() {
+            state.missing_deps.sort();
+            state.missing_deps.dedup();
+            return Err(WaxError::InstallError(format!(
+                "required system dependencies not found: {}",
+                state.missing_deps.join(", ")
+            )));
+        }
+
+        Ok(state.result)
     }
 
     fn visit<F>(
@@ -69,28 +82,26 @@ impl<'a> Resolver<'a> {
         name: &str,
         requested: bool,
         dep_satisfied: &F,
-        visited: &mut HashSet<String>,
-        pushed: &mut HashSet<String>,
-        result: &mut Vec<&'a PackageMetadata>,
-    ) -> Option<&'a PackageMetadata>
+        state: &mut ResolveState<'a>,
+    ) -> Result<Option<&'a PackageMetadata>>
     where
         F: Fn(&str) -> bool,
     {
-        if !visited.insert(name.to_string()) {
-            return self.index.find(name);
+        if !state.visited.insert(name.to_string()) {
+            return Ok(self.index.find(name));
         }
 
         if !requested && dep_satisfied(name) {
-            return None;
+            return Ok(None);
         }
 
         let meta = match self.index.find(name) {
             Some(m) => m,
             None => {
                 if !requested {
-                    warn!("Dependency not found in index (skipping): {}", name);
+                    state.missing_deps.push(name.to_string());
                 }
-                return None;
+                return Ok(None);
             }
         };
 
@@ -98,22 +109,48 @@ impl<'a> Resolver<'a> {
         // resolve via a virtual provide (for example an RPM soname), and this
         // prevents the same package being emitted again if it later appears by
         // its real package name.
-        visited.insert(meta.name.clone());
+        state.visited.insert(meta.name.clone());
 
-        // Visit all deps recursively (DFS post-order ensures deps come first)
         for dep_raw in &meta.depends {
-            let dep_name = parse_dep_name(dep_raw);
-            if dep_name.is_empty() {
-                continue;
-            }
-            self.visit(dep_name, false, dep_satisfied, visited, pushed, result);
+            self.visit_dependency(dep_raw, dep_satisfied, state)?;
         }
 
-        // Push this package after all its deps.
-        if pushed.insert(meta.name.clone()) {
-            result.push(meta);
+        if state.pushed.insert(meta.name.clone()) {
+            state.result.push(meta);
         }
-        Some(meta)
+        Ok(Some(meta))
+    }
+
+    fn visit_dependency<F>(
+        &self,
+        dep_raw: &str,
+        dep_satisfied: &F,
+        state: &mut ResolveState<'a>,
+    ) -> Result<()>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let alternatives: Vec<String> = dep_raw
+            .split('|')
+            .map(|dep| parse_dep_name(dep.trim()).to_string())
+            .filter(|dep| !dep.is_empty())
+            .collect();
+        if alternatives.is_empty() {
+            return Ok(());
+        }
+        if alternatives.iter().any(|dep| dep_satisfied(dep)) {
+            return Ok(());
+        }
+        if let Some(dep) = alternatives
+            .iter()
+            .find(|dep| self.index.find(dep).is_some())
+            .cloned()
+        {
+            self.visit(&dep, false, dep_satisfied, state)?;
+            return Ok(());
+        }
+        state.missing_deps.push(alternatives.join(" | "));
+        Ok(())
     }
 }
 
@@ -167,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_missing_dep_skipped() {
+    fn test_resolve_missing_dep_fails() {
         let index = PackageIndex {
             packages: vec![
                 make_pkg("nginx", "1.24.0", &["libpcre3", "missing-virtual-pkg"]),
@@ -175,10 +212,22 @@ mod tests {
             ],
         };
         let resolver = Resolver::new(&index);
-        let result = resolver.resolve(&["nginx".to_string()]).unwrap();
+        let err = resolver.resolve(&["nginx".to_string()]).unwrap_err();
+        assert!(err.to_string().contains("missing-virtual-pkg"));
+    }
+
+    #[test]
+    fn test_resolve_uses_available_alternative() {
+        let index = PackageIndex {
+            packages: vec![
+                make_pkg("app", "1.0.0", &["missing-one | present-one"]),
+                make_pkg("present-one", "1.0.0", &[]),
+            ],
+        };
+        let resolver = Resolver::new(&index);
+        let result = resolver.resolve(&["app".to_string()]).unwrap();
         let names: Vec<_> = result.iter().map(|p| p.name.as_str()).collect();
-        assert!(names.contains(&"nginx"));
-        assert!(names.contains(&"libpcre3"));
+        assert_eq!(names, vec!["present-one", "app"]);
     }
 
     #[test]

@@ -33,16 +33,15 @@ impl PackageIndex {
 
 /// Strip version constraints from a dep string like "libc6 (>= 2.17)" → "libc6"
 pub fn parse_dep_name(dep: &str) -> &str {
-    dep.split_whitespace()
-        .next()
-        .unwrap_or(dep)
-        .split('(')
+    let token = dep
+        .split_whitespace()
         .next()
         .unwrap_or(dep)
         .split(['=', '<', '>'])
         .next()
         .unwrap_or(dep)
-        .trim()
+        .trim();
+    token
 }
 
 #[cfg(test)]

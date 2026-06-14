@@ -19,7 +19,7 @@ impl ApkRegistry {
             "x86_64" => "x86_64",
             "aarch64" => "aarch64",
             "arm" => "armv7",
-            _ => "x86_64",
+            other => other,
         };
         Self {
             mirror: mirror.to_string(),
@@ -37,7 +37,12 @@ impl ApkRegistry {
     fn cache_path(&self) -> Result<std::path::PathBuf> {
         let dir = crate::ui::dirs::wax_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
-        Ok(dir.join(format!("apk-{}.json", self.branch.replace('/', "-"))))
+        Ok(dir.join(format!(
+            "apk-{}-{}-{}.json",
+            cache_key(&self.mirror),
+            cache_key(&self.branch),
+            cache_key(&self.arch)
+        )))
     }
 
     fn is_cache_fresh(path: &std::path::Path) -> bool {
@@ -118,6 +123,13 @@ impl ApkRegistry {
             self.mirror, self.branch, repo, self.arch
         )
     }
+}
+
+fn cache_key(value: &str) -> String {
+    value
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn alpine_branch_from_os_release() -> Option<String> {
@@ -304,7 +316,7 @@ mod tests {
             "x86_64" => "x86_64",
             "aarch64" => "aarch64",
             "arm" => "armv7",
-            _ => "x86_64",
+            other => other,
         };
 
         assert_eq!(

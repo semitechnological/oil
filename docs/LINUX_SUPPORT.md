@@ -109,6 +109,7 @@ Use explicit ecosystem/package qualifiers when you want the non-system formula/e
 - Packages with hardcoded absolute paths may extract but fail at runtime.
 - Shared libraries already present on the host are generally not copied into the Wax prefix.
 - System packages install to `~/.local` by default, even as root. Set `WAX_SYSTEM_PREFIX=/` only when you explicitly want root-owned system paths.
+- RPM registry installs currently require Fedora-compatible repository metadata. Other RPM families need repo-file parsing before Wax should select their package archives.
 - Distribution metadata formats and mirrors change; registry parsing should be kept covered by tests.
 
 ## Validation guidance

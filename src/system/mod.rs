@@ -434,7 +434,7 @@ impl SystemManager {
                 reg.load(&client).await
             }
             SystemPm::Dnf | SystemPm::Yum => {
-                let reg = crate::system::registry::dnf::DnfRegistry::fedora_default();
+                let reg = crate::system::registry::dnf::DnfRegistry::default_for_host()?;
                 reg.load(&client).await
             }
             SystemPm::Pacman => {
