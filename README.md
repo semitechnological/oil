@@ -19,11 +19,11 @@ focused on generation-based rollback.
 
 ```sh
 # Install oil (latest release)
-curl -fsSL https://github.com/tschk/oil/releases/latest/download/oil-linux-x64 -o ~/.local/bin/oil
+curl -fsSL https://github.com/semitechnological/oil/releases/latest/download/oil-linux-x64 -o ~/.local/bin/oil
 chmod +x ~/.local/bin/oil
 
 # Or build from source
-cargo install --git https://github.com/tschk/oil
+cargo install --git https://github.com/semitechnological/oil
 
 # Bootstrap packages from your distro's repos (read-only)
 oil search ripgrep
@@ -46,7 +46,7 @@ A convenience installer is included:
 ./install.sh
 
 # Or download the latest release binary:
-curl -fsSL https://raw.githubusercontent.com/tschk/oil/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/semitechnological/oil/master/install.sh | bash
 ```
 
 ## System registries

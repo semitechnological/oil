@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-REPO="tschk/oil"
+REPO="semitechnological/oil"
 INSTALL_DIR="${OIL_INSTALL_DIR:-$HOME/.local/bin}"
 VERSION="${OIL_VERSION:-}"
 

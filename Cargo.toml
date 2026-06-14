@@ -1,12 +1,12 @@
 [package]
 name = "oil"
-version = "0.18.0"
+version = "0.1.0"
 edition = "2021"
 authors = ["Oil Contributors"]
 description = "Native package manager for Alpenglow and general use"
 license = "MIT"
-repository = "https://github.com/tschk/oil"
-homepage = "https://github.com/tschk/oil"
+repository = "https://github.com/semitechnological/oil"
+homepage = "https://github.com/semitechnological/oil"
 readme = "README.md"
 keywords = ["package-manager", "system", "cli", "alpenglow"]
 categories = ["command-line-utilities", "system"]
