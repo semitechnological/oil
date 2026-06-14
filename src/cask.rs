@@ -1320,7 +1320,7 @@ impl CaskInstaller {
             hasher.update(&buffer[..n]);
         }
 
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = hex::encode(hasher.finalize());
 
         if hash != expected_sha256 {
             return Err(OilError::ChecksumMismatch {

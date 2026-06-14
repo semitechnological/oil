@@ -1,4 +1,4 @@
-//! Integration tests for the `wax` CLI binary.
+//! Integration tests for the `oil` CLI binary.
 //!
 //! These tests compile and run the real binary so they exercise the full
 //! command dispatch path.  Network-dependent tests are gated behind the
@@ -6,9 +6,9 @@
 
 use std::process::Command;
 
-fn wax() -> Command {
+fn oil_bin() -> Command {
     // Use the debug binary built by `cargo test --test cli`.
-    let bin = env!("CARGO_BIN_EXE_wax");
+    let bin = env!("CARGO_BIN_EXE_oil");
     Command::new(bin)
 }
 
@@ -18,7 +18,7 @@ fn write_windows_manifest(
     id: &str,
     version: &str,
 ) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
-    let root = home.join(".local/wax");
+    let root = home.join(".local/oil");
     let staging = root
         .join(format!("{ecosystem}-apps"))
         .join(id.replace('.', "_"))
@@ -64,28 +64,28 @@ fn write_windows_manifest(
 
 #[test]
 fn version_flag_exits_zero() {
-    let out = wax().arg("--version").output().expect("failed to run wax");
+    let out = oil_bin().arg("--version").output().expect("failed to run oil");
     assert!(out.status.success(), "exit code: {:?}", out.status.code());
 }
 
 #[test]
 fn version_output_contains_version_string() {
-    let out = wax().arg("--version").output().unwrap();
+    let out = oil_bin().arg("--version").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let combined = format!("{}{}", stdout, stderr);
     assert!(
-        combined.contains("wax"),
-        "expected 'wax' in output, got: {combined}"
+        combined.contains("oil"),
+        "expected .oil. in output, got: {combined}"
     );
 }
 
 #[test]
 fn info_flag_exits_zero() {
-    let out = wax().arg("--info").output().unwrap();
+    let out = oil_bin().arg("--info").output().unwrap();
     assert!(
         out.status.success(),
-        "wax --info failed: {}",
+        "oil --info failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -97,13 +97,13 @@ fn info_flag_exits_zero() {
 
 #[test]
 fn help_flag_exits_zero() {
-    let out = wax().arg("--help").output().unwrap();
+    let out = oil_bin().arg("--help").output().unwrap();
     assert!(out.status.success());
 }
 
 #[test]
 fn help_output_contains_subcommands() {
-    let out = wax().arg("--help").output().unwrap();
+    let out = oil_bin().arg("--help").output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     for cmd in &[
         "install",
@@ -134,10 +134,10 @@ fn subcommand_help_exits_zero() {
         "uninstall",
         "tap",
     ] {
-        let out = wax().args([sub, "--help"]).output().unwrap();
+        let out = oil_bin().args([sub, "--help"]).output().unwrap();
         assert!(
             out.status.success(),
-            "wax {sub} --help failed: {:?}",
+            "oil {sub} --help failed: {:?}",
             out.status.code()
         );
     }
@@ -145,7 +145,7 @@ fn subcommand_help_exits_zero() {
 
 #[test]
 fn doctor_help_mentions_full_flag() {
-    let out = wax().args(["doctor", "--help"]).output().unwrap();
+    let out = oil_bin().args(["doctor", "--help"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--full"), "{stdout}");
@@ -153,7 +153,7 @@ fn doctor_help_mentions_full_flag() {
 
 #[test]
 fn install_help_mentions_no_script_flag() {
-    let out = wax().args(["install", "--help"]).output().unwrap();
+    let out = oil_bin().args(["install", "--help"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--no-script"), "{stdout}");
@@ -161,7 +161,7 @@ fn install_help_mentions_no_script_flag() {
 
 #[test]
 fn update_help_mentions_self_nightly_shorts() {
-    let out = wax().args(["update", "--help"]).output().unwrap();
+    let out = oil_bin().args(["update", "--help"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("-s"), "{stdout}");
@@ -170,7 +170,7 @@ fn update_help_mentions_self_nightly_shorts() {
 
 #[test]
 fn upgrade_help_mentions_self_nightly_shorts() {
-    let out = wax().args(["upgrade", "--help"]).output().unwrap();
+    let out = oil_bin().args(["upgrade", "--help"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("-s"), "{stdout}");
@@ -180,7 +180,7 @@ fn upgrade_help_mentions_self_nightly_shorts() {
 
 #[test]
 fn self_update_help_mentions_stable_and_nightly_flags() {
-    let out = wax().args(["self-update", "--help"]).output().unwrap();
+    let out = oil_bin().args(["self-update", "--help"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("--nightly"), "{stdout}");
@@ -198,7 +198,7 @@ fn has_timing_line(stdout: &str) -> bool {
 #[test]
 fn time_to_action_flag_prints_elapsed_footer() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .env("CI", "1")
@@ -207,7 +207,7 @@ fn time_to_action_flag_prints_elapsed_footer() {
         .unwrap();
     assert!(
         out.status.success(),
-        "wax --time-to-action list failed: {}",
+        "oil --time-to-action list failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -218,7 +218,7 @@ fn time_to_action_flag_prints_elapsed_footer() {
 fn time_to_action_aliases_print_elapsed_footer() {
     for alias in ["--tta", "--time"] {
         let tmp = tempfile::tempdir().unwrap();
-        let out = wax()
+        let out = oil_bin()
             .env("HOME", tmp.path())
             .env("WAX_CACHE_DIR", tmp.path())
             .env("CI", "1")
@@ -227,7 +227,7 @@ fn time_to_action_aliases_print_elapsed_footer() {
             .unwrap();
         assert!(
             out.status.success(),
-            "wax {alias} list failed: {}",
+            "oil {alias} list failed: {}",
             String::from_utf8_lossy(&out.stderr)
         );
         let stdout = String::from_utf8_lossy(&out.stdout);
@@ -238,7 +238,7 @@ fn time_to_action_aliases_print_elapsed_footer() {
 #[test]
 fn list_without_time_flag_omits_elapsed_footer() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .env("CI", "1")
@@ -247,7 +247,7 @@ fn list_without_time_flag_omits_elapsed_footer() {
         .unwrap();
     assert!(
         out.status.success(),
-        "wax list failed: {}",
+        "oil list failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -296,7 +296,7 @@ fn single_formula_upgrade_does_not_reinstall_dependents() {
 fn list_exits_zero() {
     // `wax list` works without a populated cache (just shows an empty list).
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .env("CI", "1")
@@ -306,7 +306,7 @@ fn list_exits_zero() {
     // Either success or a clean "no packages" message; not a crash.
     assert!(
         out.status.success(),
-        "wax list failed: {}",
+        "oil list failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -314,7 +314,7 @@ fn list_exits_zero() {
 #[test]
 fn list_with_query_exits_zero() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .env("CI", "1")
@@ -323,7 +323,7 @@ fn list_with_query_exits_zero() {
         .unwrap();
     assert!(
         out.status.success(),
-        "wax list rust failed: {}",
+        "oil list rust failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -338,7 +338,7 @@ fn list_plain_shows_test_cellar_formulae() {
     let cache = tmp.path().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
 
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", &cache)
         .env("WAX_TEST_CELLAR", &cellar)
@@ -371,7 +371,7 @@ fn list_plain_filter_excludes_non_matching() {
     let cache = tmp.path().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
 
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", &cache)
         .env("WAX_TEST_CELLAR", &cellar)
@@ -404,7 +404,7 @@ fn list_plain_no_match_reports_query() {
     std::fs::create_dir_all(&cache).unwrap();
 
     let needle = "zzz-nope-match";
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", &cache)
         .env("WAX_TEST_CELLAR", &cellar)
@@ -431,7 +431,7 @@ fn list_plain_shows_windows_manifests() {
     std::fs::create_dir_all(&cache).unwrap();
     write_windows_manifest(tmp.path(), "scoop", "ripgrep", "14.1.1");
 
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", &cache)
         .env("WAX_TEST_CELLAR", &cellar)
@@ -456,7 +456,7 @@ fn uninstall_removes_windows_manifest_package() {
     std::fs::create_dir_all(&cache).unwrap();
     let (manifest, staging, bin) = write_windows_manifest(tmp.path(), "scoop", "ripgrep", "14.1.1");
 
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", &cache)
         .env("CI", "1")
@@ -476,7 +476,7 @@ fn uninstall_removes_windows_manifest_package() {
 #[test]
 fn tap_list_exits_zero() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .arg("tap")
@@ -485,7 +485,7 @@ fn tap_list_exits_zero() {
         .unwrap();
     assert!(
         out.status.success(),
-        "wax tap list failed: {}",
+        "oil tap list failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -496,7 +496,7 @@ fn hidden_refresh_state_command_exits_zero() {
         return;
     }
 
-    let out = wax().arg("__refresh_state").output().unwrap();
+    let out = oil_bin().arg("__refresh_state").output().unwrap();
     assert!(
         out.status.success(),
         "{}",
@@ -508,27 +508,27 @@ fn hidden_refresh_state_command_exits_zero() {
 
 #[test]
 fn install_no_args_does_not_panic() {
-    let out = wax().arg("install").output().unwrap();
-    // `wax install` with no args now syncs from lockfile (like npm install).
+    let out = oil_bin().arg("install").output().unwrap();
+    // `oil install` with no args now syncs from lockfile (like npm install).
     // It may succeed (no lockfile → no-op) or fail gracefully; either is fine.
     let stderr = String::from_utf8_lossy(&out.stderr);
     // Must not produce a Rust panic message.
     assert!(
         !stderr.contains("thread 'main' panicked"),
-        "wax panicked: {stderr}"
+        "oil panicked: {stderr}"
     );
 }
 
 #[test]
 fn search_no_args_does_not_panic() {
-    let out = wax().arg("search").output().unwrap();
+    let out = oil_bin().arg("search").output().unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("thread 'main' panicked"), "{stderr}");
 }
 
 #[test]
 fn unknown_subcommand_exits_nonzero() {
-    let out = wax()
+    let out = oil_bin()
         .arg("definitely-not-a-real-subcommand")
         .output()
         .unwrap();
@@ -539,10 +539,10 @@ fn unknown_subcommand_exits_nonzero() {
 
 #[test]
 fn system_help_exits_zero() {
-    let out = wax().args(["system", "--help"]).output().unwrap();
+    let out = oil_bin().args(["system", "--help"]).output().unwrap();
     assert!(
         out.status.success(),
-        "wax system --help failed: {:?}",
+        "oil system --help failed: {:?}",
         out.status.code()
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -567,7 +567,7 @@ fn system_help_exits_zero() {
 #[test]
 fn system_search_exits_zero_or_shows_no_pm() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .args(["system", "search", "ripgrep", "--limit", "2"])
@@ -576,14 +576,14 @@ fn system_search_exits_zero_or_shows_no_pm() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success() || stderr.contains("no supported system package manager"),
-        "wax system search failed unexpectedly: {stderr}"
+        "oil system search failed unexpectedly: {stderr}"
     );
 }
 
 #[test]
 fn system_status_exits_zero_or_shows_no_pm() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .args(["system", "status"])
@@ -593,14 +593,14 @@ fn system_status_exits_zero_or_shows_no_pm() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success() || stderr.contains("no supported system package manager"),
-        "wax system status failed unexpectedly: {stderr}"
+        "oil system status failed unexpectedly: {stderr}"
     );
 }
 
 #[test]
 fn system_generations_exits_zero_or_shows_no_pm() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .args(["system", "generations"])
@@ -609,16 +609,16 @@ fn system_generations_exits_zero_or_shows_no_pm() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success() || stderr.contains("no supported system package manager"),
-        "wax system generations failed unexpectedly: {stderr}"
+        "oil system generations failed unexpectedly: {stderr}"
     );
 }
 
 #[test]
 fn features_flag_exits_zero() {
-    let out = wax().arg("features").output().unwrap();
+    let out = oil_bin().arg("features").output().unwrap();
     assert!(
         out.status.success(),
-        "wax features failed: {}",
+        "oil features failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -626,7 +626,7 @@ fn features_flag_exits_zero() {
 #[test]
 fn outdated_exits_zero() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("WAX_CACHE_DIR", tmp.path())
         .arg("outdated")
@@ -634,27 +634,27 @@ fn outdated_exits_zero() {
         .unwrap();
     assert!(
         out.status.success(),
-        "wax outdated failed: {}",
+        "oil outdated failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
 
 #[test]
 fn link_help_exits_zero() {
-    let out = wax().args(["link", "--help"]).output().unwrap();
+    let out = oil_bin().args(["link", "--help"]).output().unwrap();
     assert!(
         out.status.success(),
-        "wax link --help failed: {:?}",
+        "oil link --help failed: {:?}",
         out.status.code()
     );
 }
 
 #[test]
 fn unlink_help_exits_zero() {
-    let out = wax().args(["unlink", "--help"]).output().unwrap();
+    let out = oil_bin().args(["unlink", "--help"]).output().unwrap();
     assert!(
         out.status.success(),
-        "wax unlink --help failed: {:?}",
+        "oil unlink --help failed: {:?}",
         out.status.code()
     );
 }
@@ -662,7 +662,7 @@ fn unlink_help_exits_zero() {
 #[test]
 fn reinstall_missing_package_exits_nonzero_without_installing() {
     let tmp = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("HOME", tmp.path())
         .env("CI", "1")
         .args(["reinstall", "definitely-no-such-package"])
@@ -688,7 +688,7 @@ fn search_tree_finds_results() {
     if !integration_enabled() {
         return;
     }
-    let out = wax().args(["search", "tree"]).output().unwrap();
+    let out = oil_bin().args(["search", "tree"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("tree"), "expected 'tree' in search results");
@@ -699,7 +699,7 @@ fn info_tree_shows_details() {
     if !integration_enabled() {
         return;
     }
-    let out = wax().args(["info", "tree"]).output().unwrap();
+    let out = oil_bin().args(["info", "tree"]).output().unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("tree"));
@@ -711,14 +711,14 @@ fn update_fetches_index() {
         return;
     }
     let cache_dir = tempfile::tempdir().unwrap();
-    let out = wax()
+    let out = oil_bin()
         .env("WAX_CACHE_DIR", cache_dir.path())
         .arg("update")
         .output()
         .unwrap();
     assert!(
         out.status.success(),
-        "wax update failed: {}",
+        "oil update failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     // Cache should now exist.

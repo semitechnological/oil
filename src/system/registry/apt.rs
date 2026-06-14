@@ -173,7 +173,7 @@ impl AptRegistry {
                 if let Some(expected) = hashes.get(&packages_gz_path) {
                     let mut hasher = sha2::Sha256::new();
                     hasher.update(&bytes);
-                    let actual = format!("{:x}", hasher.finalize());
+                    let actual = hex::encode(hasher.finalize());
                     if actual != *expected {
                         return Err(OilError::ChecksumMismatch {
                             expected: expected.clone(),

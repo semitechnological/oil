@@ -11,7 +11,7 @@ focused on generation-based rollback.
 - **Own prefix** — installs to `/usr/local/oil` or `~/.local/oil`. No /usr pollution.
 - **Generation rollback** — every install creates a snapshot. Rollback with `oil rollback`.
 - **OS-gated** — compile with `--no-default-features` to strip unused system registries.
-- **System registries** — built-in parsers for APT, DNF, Pacman, APK, XBPS, Nix, and Homebrew repos.
+- **System registries** — built-in parsers for APT, DNF, Pacman, APK, XBPS, Nix, and Linuxbrew repos.
   These are *read-only* data sources for resolving packages. Oil never delegates to host package managers.
   Installed files and Oil-owned state remain the source of truth.
 
@@ -61,7 +61,7 @@ Oil resolves packages through existing distribution ecosystems (feature-gated):
 | `system-apk` | Alpine/Chimera repos | `.apk` |
 | `system-xbps` | Void repos | `.xbps` |
 | `system-nix` | Nixpkgs | Nix store |
-| `system-brew` | Homebrew | Bottles |
+| `system-brew` | Linuxbrew | Bottles |
 
 Default builds include all registries (`system-all`).
 Compile with `--no-default-features` to select only what you need.

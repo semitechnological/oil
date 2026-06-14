@@ -517,7 +517,7 @@ impl BottleDownloader {
             hasher.update(&buffer[..n]);
         }
 
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = hex::encode(hasher.finalize());
 
         if hash != expected_sha256 {
             return Err(OilError::ChecksumMismatch {
@@ -1467,7 +1467,7 @@ mod tests {
         use sha2::{Digest, Sha256};
         let mut f = NamedTempFile::new().unwrap();
         f.write_all(b"hello world").unwrap();
-        let hash = format!("{:x}", Sha256::digest(b"hello world"));
+        let hash = hex::encode(Sha256::digest(b"hello world"));
         let result = BottleDownloader::verify_checksum(f.path(), &hash);
         assert!(result.is_ok(), "{:?}", result);
     }
