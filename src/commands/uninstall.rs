@@ -12,6 +12,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Confirm;
 use std::path::Path;
+use std::process::Command;
 use std::time::Instant;
 
 pub async fn uninstall(
@@ -183,6 +184,9 @@ async fn uninstall_windows_package(
     }
 
     set_current_op(format!("removing {}", qualified));
+    if let Some(uninstall) = &manifest.native_uninstall {
+        run_native_uninstall(&uninstall.command, &uninstall.args)?;
+    }
     windows_state::remove_manifest(manifest, false)?;
 
     if !quiet {
@@ -196,6 +200,22 @@ async fn uninstall_windows_package(
     }
 
     Ok(())
+}
+
+fn run_native_uninstall(command: &str, args: &[String]) -> Result<()> {
+    if !cfg!(target_os = "windows") {
+        return Err(WaxError::PlatformNotSupported(
+            "native Windows uninstall is only supported on Windows".into(),
+        ));
+    }
+    let status = Command::new(command).args(args).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(WaxError::InstallError(format!(
+            "native uninstall command failed with {status}: {command}"
+        )))
+    }
 }
 
 async fn uninstall_package_direct(

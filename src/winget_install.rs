@@ -1,4 +1,4 @@
-//! winget-pkgs portable **zip** installs (InstallerType zip + NestedInstallerType portable).
+//! winget-pkgs installs.
 //! Uses the public GitHub API / raw.githubusercontent.com — no winget.exe.
 
 use crate::bottle::BottleDownloader;
@@ -6,10 +6,11 @@ use crate::error::{Result, WaxError};
 use crate::package_spec::Ecosystem;
 use crate::scoop;
 use crate::version;
-use crate::windows_state::{self, WindowsPackageManifest};
+use crate::windows_state::{self, WindowsNativeUninstall, WindowsPackageManifest};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::Deserialize;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use tempfile::TempDir;
 use tracing::debug;
 
@@ -116,6 +117,8 @@ struct WingetInstallerDoc {
     installer_type: Option<String>,
     nested_installer_type: Option<String>,
     nested_installer_files: Option<Vec<WingetNestedFile>>,
+    installer_switches: Option<WingetInstallerSwitches>,
+    apps_and_features_entries: Option<Vec<WingetAppsAndFeaturesEntry>>,
     installers: Vec<WingetInstallerEntry>,
 }
 
@@ -132,6 +135,26 @@ struct WingetInstallerEntry {
     architecture: String,
     installer_url: String,
     installer_sha256: String,
+    installer_type: Option<String>,
+    installer_switches: Option<WingetInstallerSwitches>,
+    product_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct WingetInstallerSwitches {
+    silent: Option<String>,
+    silent_with_progress: Option<String>,
+    custom: Option<String>,
+    install_location: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct WingetAppsAndFeaturesEntry {
+    product_code: Option<String>,
+    package_family_name: Option<String>,
+    silent_uninstall_string: Option<String>,
 }
 
 fn pick_installer(doc: &WingetInstallerDoc) -> Result<&WingetInstallerEntry> {
@@ -143,10 +166,207 @@ fn pick_installer(doc: &WingetInstallerDoc) -> Result<&WingetInstallerEntry> {
         .ok_or_else(|| WaxError::InstallError("winget manifest has no installers".into()))
 }
 
-pub async fn install_portable_zip(package_id: &str) -> Result<()> {
+fn installer_type_for<'a>(doc: &'a WingetInstallerDoc, inst: &'a WingetInstallerEntry) -> &'a str {
+    inst.installer_type
+        .as_deref()
+        .or(doc.installer_type.as_deref())
+        .unwrap_or("")
+}
+
+fn installer_switches_for<'a>(
+    doc: &'a WingetInstallerDoc,
+    inst: &'a WingetInstallerEntry,
+) -> Option<&'a WingetInstallerSwitches> {
+    inst.installer_switches
+        .as_ref()
+        .or(doc.installer_switches.as_ref())
+}
+
+fn split_switches(raw: &str) -> Vec<String> {
+    raw.split_whitespace().map(|s| s.to_string()).collect()
+}
+
+fn msi_install_args(path: &Path) -> Vec<String> {
+    vec![
+        "/i".into(),
+        path.to_string_lossy().to_string(),
+        "/qn".into(),
+        "/norestart".into(),
+    ]
+}
+
+fn msi_uninstall(product_code: &str) -> WindowsNativeUninstall {
+    WindowsNativeUninstall {
+        command: "msiexec.exe".into(),
+        args: vec![
+            "/x".into(),
+            product_code.to_string(),
+            "/qn".into(),
+            "/norestart".into(),
+        ],
+    }
+}
+
+fn ps_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+fn msix_install_args(path: &Path) -> Vec<String> {
+    vec![
+        "-NoProfile".into(),
+        "-ExecutionPolicy".into(),
+        "Bypass".into(),
+        "-Command".into(),
+        format!(
+            "Add-AppxPackage -Path {}",
+            ps_quote(&path.to_string_lossy())
+        ),
+    ]
+}
+
+fn msix_uninstall(package_family_name: &str) -> WindowsNativeUninstall {
+    WindowsNativeUninstall {
+        command: "powershell.exe".into(),
+        args: vec![
+            "-NoProfile".into(),
+            "-ExecutionPolicy".into(),
+            "Bypass".into(),
+            "-Command".into(),
+            format!(
+                "Get-AppxPackage -PackageFamilyName {} | Remove-AppxPackage",
+                ps_quote(package_family_name)
+            ),
+        ],
+    }
+}
+
+fn exe_install_args(switches: &WingetInstallerSwitches) -> Result<Vec<String>> {
+    let raw = switches
+        .silent
+        .as_deref()
+        .or(switches.silent_with_progress.as_deref())
+        .ok_or_else(|| {
+            WaxError::InstallError("winget exe installer is missing silent install switches".into())
+        })?;
+    let mut args = split_switches(raw);
+    if let Some(custom) = &switches.custom {
+        args.extend(split_switches(custom));
+    }
+    if let Some(location) = &switches.install_location {
+        args.extend(split_switches(location));
+    }
+    Ok(args)
+}
+
+fn exe_uninstall(doc: &WingetInstallerDoc) -> Result<WindowsNativeUninstall> {
+    let raw = doc
+        .apps_and_features_entries
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .find_map(|entry| entry.silent_uninstall_string.as_deref())
+        .ok_or_else(|| {
+            WaxError::InstallError(
+                "winget exe installer is missing silent uninstall metadata".into(),
+            )
+        })?;
+    let mut parts = split_switches(raw);
+    let command = parts
+        .drain(..1)
+        .next()
+        .ok_or_else(|| WaxError::InstallError("empty silent uninstall metadata".into()))?;
+    Ok(WindowsNativeUninstall {
+        command,
+        args: parts,
+    })
+}
+
+fn product_code_for(doc: &WingetInstallerDoc, inst: &WingetInstallerEntry) -> Option<String> {
+    inst.product_code.clone().or_else(|| {
+        doc.apps_and_features_entries
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .find_map(|entry| entry.product_code.clone())
+    })
+}
+
+fn package_family_name_for(doc: &WingetInstallerDoc) -> Option<String> {
+    doc.apps_and_features_entries
+        .as_deref()
+        .unwrap_or(&[])
+        .iter()
+        .find_map(|entry| entry.package_family_name.clone())
+}
+
+fn native_plan(
+    doc: &WingetInstallerDoc,
+    inst: &WingetInstallerEntry,
+    installer_path: &Path,
+) -> Result<(String, Vec<String>, WindowsNativeUninstall)> {
+    let inst_type = installer_type_for(doc, inst).to_ascii_lowercase();
+    match inst_type.as_str() {
+        "msi" | "wix" => {
+            let product_code = product_code_for(doc, inst).ok_or_else(|| {
+                WaxError::InstallError(
+                    "winget msi installer is missing ProductCode for managed uninstall".into(),
+                )
+            })?;
+            Ok((
+                "msiexec.exe".into(),
+                msi_install_args(installer_path),
+                msi_uninstall(&product_code),
+            ))
+        }
+        "msix" | "appx" => {
+            let family = package_family_name_for(doc).ok_or_else(|| {
+                WaxError::InstallError(
+                    "winget msix installer is missing PackageFamilyName for managed uninstall"
+                        .into(),
+                )
+            })?;
+            Ok((
+                "powershell.exe".into(),
+                msix_install_args(installer_path),
+                msix_uninstall(&family),
+            ))
+        }
+        "exe" | "inno" | "nullsoft" | "burn" => {
+            let switches = installer_switches_for(doc, inst).ok_or_else(|| {
+                WaxError::InstallError("winget exe installer is missing InstallerSwitches".into())
+            })?;
+            Ok((
+                installer_path.to_string_lossy().to_string(),
+                exe_install_args(switches)?,
+                exe_uninstall(doc)?,
+            ))
+        }
+        _ => Err(WaxError::InstallError(format!(
+            "wax does not support native winget InstallerType={inst_type}"
+        ))),
+    }
+}
+
+fn run_native_command(command: &str, args: &[String]) -> Result<()> {
     if !cfg!(target_os = "windows") {
         return Err(WaxError::PlatformNotSupported(
-            "winget-style portable install is only supported on Windows".into(),
+            "native Windows installer execution is only supported on Windows".into(),
+        ));
+    }
+    let status = Command::new(command).args(args).status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(WaxError::InstallError(format!(
+            "native installer command failed with {status}: {command}"
+        )))
+    }
+}
+
+pub async fn install_winget_package(package_id: &str) -> Result<()> {
+    if !cfg!(target_os = "windows") {
+        return Err(WaxError::PlatformNotSupported(
+            "winget install is only supported on Windows".into(),
         ));
     }
 
@@ -196,19 +416,17 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     let doc: WingetInstallerDoc =
         serde_yaml::from_str(&yaml_text).map_err(|e| WaxError::ParseError(e.to_string()))?;
 
-    let inst_type = doc.installer_type.as_deref().unwrap_or("");
-    let nested = doc.nested_installer_type.as_deref().unwrap_or("");
-    if !inst_type.eq_ignore_ascii_case("zip") || !nested.eq_ignore_ascii_case("portable") {
-        return Err(WaxError::InstallError(format!(
-            "wax only supports winget zip+portable manifests (got InstallerType={inst_type}, NestedInstallerType={nested})"
-        )));
-    }
-
     let inst = pick_installer(&doc)?;
+    let inst_type = installer_type_for(&doc, inst);
+    let nested = doc.nested_installer_type.as_deref().unwrap_or("");
     let sha_expected = inst.installer_sha256.trim().to_ascii_lowercase();
 
     let tmp = TempDir::new()?;
-    let archive_path = tmp.path().join("winget.zip");
+    let archive_name = Path::new(&inst.installer_url)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("winget-installer.bin");
+    let archive_path = tmp.path().join(archive_name);
 
     let dl = BottleDownloader::new();
     let size = dl.probe_size(&inst.installer_url).await;
@@ -228,6 +446,10 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     pb.finish_and_clear();
 
     BottleDownloader::verify_checksum(&archive_path, &sha_expected)?;
+
+    if !inst_type.eq_ignore_ascii_case("zip") || !nested.eq_ignore_ascii_case("portable") {
+        return install_native_winget_package(package_id, &latest, &doc, inst, &archive_path).await;
+    }
 
     let extract_root = tmp.path().join("extract");
     std::fs::create_dir_all(&extract_root)?;
@@ -289,7 +511,7 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
         package_id,
         latest.clone(),
         inst.installer_url.clone(),
-        staging,
+        staging.clone(),
         bin_links,
         files,
     )
@@ -303,4 +525,141 @@ pub async fn install_portable_zip(package_id: &str) -> Result<()> {
     );
 
     Ok(())
+}
+
+async fn install_native_winget_package(
+    package_id: &str,
+    latest: &str,
+    doc: &WingetInstallerDoc,
+    inst: &WingetInstallerEntry,
+    installer_path: &Path,
+) -> Result<()> {
+    let staging = windows_state::wax_windows_root()?
+        .join("winget-installers")
+        .join(package_id.replace('.', "_"))
+        .join(latest);
+    if staging.exists() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    let staged_installer = staging.join(
+        installer_path
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("installer.bin")),
+    );
+    let (command, args, uninstall) = native_plan(doc, inst, &staged_installer)?;
+    std::fs::create_dir_all(&staging)?;
+    std::fs::copy(installer_path, &staged_installer)?;
+
+    if let Err(err) = run_native_command(&command, &args) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(err);
+    }
+
+    let files = windows_state::collect_files(&staging)?;
+    let manifest = WindowsPackageManifest::new(
+        Ecosystem::Winget,
+        package_id,
+        latest.to_string(),
+        inst.installer_url.clone(),
+        staging.clone(),
+        Vec::new(),
+        files,
+    )
+    .with_native_uninstall(uninstall);
+    if let Err(err) = manifest.save() {
+        if let Some(native) = &manifest.native_uninstall {
+            let _ = run_native_command(&native.command, &native.args);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(err);
+    }
+
+    println!(
+        "Installed {} {} (winget native installer)",
+        package_id, latest
+    );
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(installer_type: &str) -> WingetInstallerEntry {
+        WingetInstallerEntry {
+            architecture: "x64".into(),
+            installer_url: "https://example.invalid/app.msi".into(),
+            installer_sha256: "abc".into(),
+            installer_type: Some(installer_type.into()),
+            installer_switches: None,
+            product_code: None,
+        }
+    }
+
+    #[test]
+    fn native_msi_requires_product_code_and_builds_msiexec() {
+        let mut inst = entry("msi");
+        inst.product_code = Some("{PRODUCT}".into());
+        let doc = WingetInstallerDoc {
+            installer_type: None,
+            nested_installer_type: None,
+            nested_installer_files: None,
+            installer_switches: None,
+            apps_and_features_entries: None,
+            installers: vec![],
+        };
+        let (cmd, args, uninstall) = native_plan(&doc, &inst, Path::new("C:/tmp/app.msi")).unwrap();
+        assert_eq!(cmd, "msiexec.exe");
+        assert_eq!(args[0], "/i");
+        assert_eq!(uninstall.command, "msiexec.exe");
+        assert_eq!(uninstall.args[0], "/x");
+        assert_eq!(uninstall.args[1], "{PRODUCT}");
+    }
+
+    #[test]
+    fn native_exe_rejects_missing_uninstall_metadata() {
+        let mut inst = entry("exe");
+        inst.installer_switches = Some(WingetInstallerSwitches {
+            silent: Some("/S".into()),
+            silent_with_progress: None,
+            custom: None,
+            install_location: None,
+        });
+        let doc = WingetInstallerDoc {
+            installer_type: None,
+            nested_installer_type: None,
+            nested_installer_files: None,
+            installer_switches: None,
+            apps_and_features_entries: None,
+            installers: vec![],
+        };
+        assert!(native_plan(&doc, &inst, Path::new("C:/tmp/app.exe")).is_err());
+    }
+
+    #[test]
+    fn native_msix_builds_powershell_commands() {
+        let inst = entry("msix");
+        let doc = WingetInstallerDoc {
+            installer_type: None,
+            nested_installer_type: None,
+            nested_installer_files: None,
+            installer_switches: None,
+            apps_and_features_entries: Some(vec![WingetAppsAndFeaturesEntry {
+                product_code: None,
+                package_family_name: Some("Example.App_123".into()),
+                silent_uninstall_string: None,
+            }]),
+            installers: vec![],
+        };
+        let (cmd, args, uninstall) =
+            native_plan(&doc, &inst, Path::new("C:/tmp/app.msix")).unwrap();
+        assert_eq!(cmd, "powershell.exe");
+        assert!(args.iter().any(|arg| arg.contains("Add-AppxPackage")));
+        assert_eq!(uninstall.command, "powershell.exe");
+        assert!(uninstall
+            .args
+            .iter()
+            .any(|arg| arg.contains("Remove-AppxPackage")));
+    }
 }

@@ -82,7 +82,7 @@ async fn install_forced(eco: Ecosystem, name: &str, dry_run: bool) -> Result<()>
     match eco {
         Ecosystem::Brew => Ok(()),
         Ecosystem::Scoop => scoop::install_from_bucket(name, None).await,
-        Ecosystem::Winget => winget_install::install_portable_zip(name).await,
+        Ecosystem::Winget => winget_install::install_winget_package(name).await,
         Ecosystem::Chocolatey => chocolatey::install_portable_tools(name).await,
     }
 }

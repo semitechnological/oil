@@ -27,10 +27,10 @@ Tap-style names (`user/repo/formula`) and version pins (`pkg@version`) skip auto
 |--------|----------------|
 | **brew** | Existing bottle/source/cask flows. |
 | **scoop** | JSON manifest → zip/tar.gz → `~/.local/wax/bin` (Windows) + Wax manifest state. No `pre_install` / `installer` scripts. |
-| **winget** | Latest version under `manifests/<letter>/…` on **microsoft/winget-pkgs**; **only** `InstallerType: zip` + `NestedInstallerType: portable` manifests + Wax manifest state. |
+| **winget** | Latest version under `manifests/<letter>/…` on **microsoft/winget-pkgs**; portable zip installs and native MSI/MSIX/EXE installs when the manifest has checksum, silent install data, and managed uninstall metadata. |
 | **chocolatey** | Latest `.nupkg` → extract → copy `tools/**/*.exe` (filters obvious uninstall/choco helpers) + Wax manifest state. Script-only packages fail with a clear error. |
 
-MSI/EXE/MSIX installers from winget or Chocolatey are **out of scope** for wax-managed install until Wax has its own safe installer execution model.
+Chocolatey script-driven native installers remain out of scope until Wax has a constrained Chocolatey helper parser. Wax does not run arbitrary package PowerShell.
 
 ## Search
 
@@ -41,6 +41,7 @@ MSI/EXE/MSIX installers from winget or Chocolatey are **out of scope** for wax-m
 
 - `wax list` includes Wax-managed Scoop, winget, and Chocolatey portable installs as `scoop/id`, `winget/id`, or `choco/id`.
 - `wax uninstall scoop/id`, `wax uninstall winget/id`, and `wax uninstall choco/id` remove the recorded `~/.local/wax/bin` links, staged files, staging directory, and Wax manifest.
+- For winget native installers, `wax uninstall winget/id` runs the recorded native uninstall command before removing Wax state.
 - `wax uninstall --all` includes these Windows portable manifests.
 - `wax upgrade scoop/id`, `wax upgrade winget/id`, and `wax upgrade choco/id` reinstall the recorded package through Wax’s own source backend.
 - Install refuses to overwrite a `~/.local/wax/bin` executable already owned by another Windows manifest.

@@ -13,7 +13,24 @@ pub struct WindowsPackageManifest {
     pub staging_dir: PathBuf,
     pub bin_links: Vec<PathBuf>,
     pub files: Vec<PathBuf>,
+    #[serde(default)]
+    pub install_kind: WindowsInstallKind,
+    #[serde(default)]
+    pub native_uninstall: Option<WindowsNativeUninstall>,
     pub installed_at: i64,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WindowsInstallKind {
+    #[default]
+    Portable,
+    Native,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WindowsNativeUninstall {
+    pub command: String,
+    pub args: Vec<String>,
 }
 
 pub fn wax_windows_root() -> Result<PathBuf> {
@@ -88,11 +105,19 @@ impl WindowsPackageManifest {
             staging_dir,
             bin_links,
             files,
+            install_kind: WindowsInstallKind::Portable,
+            native_uninstall: None,
             installed_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs() as i64,
         }
+    }
+
+    pub fn with_native_uninstall(mut self, uninstall: WindowsNativeUninstall) -> Self {
+        self.install_kind = WindowsInstallKind::Native;
+        self.native_uninstall = Some(uninstall);
+        self
     }
 
     pub fn save(&self) -> Result<()> {
