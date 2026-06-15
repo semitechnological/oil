@@ -316,18 +316,33 @@ impl TapManager {
         })?;
         debug!("Cloning tap from {}", url);
 
-        // ponytail: ensure git-remote-https is findable — check under oil prefix
-        // for git-core helpers when system git doesn't have them (e.g. APK on Chimera)
+        // ponytail: ensure git-remote-https is findable. Only override GIT_EXEC_PATH
+        // when system git lacks the helper and we have it under the oil prefix.
         let mut cmd = tokio::process::Command::new("git");
         cmd.args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()]);
-        // Search common git-core locations under the oil install prefix
-        let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
-        for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
-            if let Some(ref root) = oil_root {
-                let p = root.join(candidate);
-                if p.join("git-remote-https").exists() {
-                    cmd.env("GIT_EXEC_PATH", &p);
-                    break;
+        // Check whether stock git has remote-https
+        let git_exec = tokio::process::Command::new("git")
+            .args(["--exec-path"])
+            .output()
+            .await
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| std::path::PathBuf::from(s.trim()));
+        let has_https = git_exec
+            .as_ref()
+            .map(|p| p.join("git-remote-https").exists())
+            .unwrap_or(false);
+        if !has_https {
+            // Search common git-core locations under the oil install prefix
+            let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
+            for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
+                if let Some(ref root) = oil_root {
+                    let p = root.join(candidate);
+                    if p.join("git-remote-https").exists() {
+                        cmd.env("GIT_EXEC_PATH", &p);
+                        break;
+                    }
                 }
             }
         }
