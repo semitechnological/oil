@@ -45,9 +45,8 @@ clap = { version = "4", features = ["derive", "cargo"] }
 clap_complete = "4"
 
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.13", features = ["json", "stream", "gzip"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "stream", "gzip"] }
 futures = "0.3"
-rustls-webpki = "0.103.13"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
