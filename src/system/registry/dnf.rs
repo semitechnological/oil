@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use super::{PackageIndex, PackageMetadata};
 use crate::error::{Result, OilError};
 use flate2::read::GzDecoder;

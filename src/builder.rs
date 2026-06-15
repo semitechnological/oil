@@ -327,7 +327,7 @@ impl Builder {
         tokio::fs::create_dir_all(&bin_dir).await?;
         tokio::fs::copy(source_dir.join("main"), bin_dir.join("main")).await?;
         // Rename to the formula name
-        let formula_name = source_dir
+        let _formula_name = source_dir
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("app");

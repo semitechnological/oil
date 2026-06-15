@@ -33,7 +33,7 @@ pub fn extract_nar(data: &[u8], dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<Pa
     pos += 8;
 
     // Parse the top-level entry (must be a directory representing the store path root)
-    pos += parse_entry(data, &mut pos, dest_dir, &mut files, &mut dirs)?;
+    parse_entry(data, &mut pos, dest_dir, &mut files, &mut dirs)?;
 
     Ok((files, dirs))
 }

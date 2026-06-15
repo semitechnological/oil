@@ -5,7 +5,7 @@ use crate::cask::{CaskState, InstalledCask};
 use crate::commands::self_update::{self_update, Channel};
 use crate::commands::{install, uninstall};
 use crate::discovery::discover_manually_installed_casks;
-use crate::ecosystem_install;
+
 use crate::error::{Result, OilError};
 use crate::install::{InstallMode, InstallState};
 use crate::signal::{

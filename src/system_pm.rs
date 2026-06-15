@@ -140,19 +140,6 @@ impl SystemPm {
         }).unwrap_or_default()
     }
 
-    /// Oil never delegates to host package managers.
-    pub async fn upgrade_all(&self) -> Result<()> {
-        Err(OilError::PlatformNotSupported(
-            "not supported: use `oil upgrade`".into()
-        ))
-    }
-
-    pub async fn install(&self, _packages: &[String]) -> Result<()> {
-        Err(OilError::PlatformNotSupported(
-            "not supported: use `oil install`".into()
-        ))
-    }
-
     /// List packages currently installed by this package manager.
     pub async fn list_installed(&self) -> Result<Vec<(String, Option<String>)>> {
         match self {

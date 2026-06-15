@@ -5,7 +5,7 @@
 use super::{PackageIndex, PackageMetadata};
 use crate::error::{Result, OilError};
 use std::time::{Duration, SystemTime};
-use tracing::{debug, warn};
+use tracing::debug;
 
 pub struct XbpsRegistry {
     mirror: String,

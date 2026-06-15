@@ -6,7 +6,6 @@
 /// 3. Downloads + extracts NAR archives directly
 use super::{PackageIndex, PackageMetadata};
 use crate::error::{Result, OilError};
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tracing::debug;
 

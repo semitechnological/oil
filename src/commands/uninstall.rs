@@ -12,7 +12,6 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use inquire::Confirm;
 use std::path::Path;
-use std::process::Command;
 use std::time::Instant;
 
 pub async fn uninstall(

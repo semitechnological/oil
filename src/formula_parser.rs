@@ -404,10 +404,16 @@ impl FormulaParser {
             }
         }
 
-        // 3. Top-level url/sha (no platform block).
-        if let Some(art) = Self::extract_url_sha(content) {
-            if art.sha256.is_some() {
-                return Some((art.url, art.sha256?));
+        // 3. Top-level url/sha (no platform block) — only when there are no platform blocks.
+        if !content.contains("on_linux do")
+            && !content.contains("on_macos do")
+            && !content.contains("on_intel do")
+            && !content.contains("on_arm do")
+        {
+            if let Some(art) = Self::extract_url_sha(content) {
+                if art.sha256.is_some() {
+                    return Some((art.url, art.sha256?));
+                }
             }
         }
 

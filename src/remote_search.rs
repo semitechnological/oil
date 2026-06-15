@@ -5,13 +5,14 @@ use crate::error::Result;
 use crate::package_spec::Ecosystem;
 use console::style;
 use std::collections::HashMap;
-use std::path::Path;
+
 
 /// Single result from a remote search.
 #[derive(Debug, Clone)]
 pub struct RemoteHit {
     pub id: String,
     pub ecosystem: Ecosystem,
+    #[allow(dead_code)]
     pub version: String,
     pub description: String,
 }

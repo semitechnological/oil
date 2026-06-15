@@ -29,6 +29,7 @@ impl Cache {
         Ok(Self { cache_dir })
     }
 
+    #[allow(dead_code)]
     pub fn cache_dir_path(&self) -> &std::path::Path {
         &self.cache_dir
     }
