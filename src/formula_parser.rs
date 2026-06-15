@@ -404,6 +404,13 @@ impl FormulaParser {
             }
         }
 
+        // 3. Top-level url/sha (no platform block).
+        if let Some(art) = Self::extract_url_sha(content) {
+            if art.sha256.is_some() {
+                return Some((art.url, art.sha256?));
+            }
+        }
+
         None
     }
 
