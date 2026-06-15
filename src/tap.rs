@@ -3,6 +3,35 @@ use crate::error::{Result, OilError};
 use crate::formula_parser::FormulaParser;
 use crate::ui::dirs;
 use serde::{Deserialize, Serialize};
+/// Create a git Command with GIT_EXEC_PATH set if the stock git lacks remote-https
+/// helpers (e.g. on Chimera where git is installed via oil into a non-standard prefix).
+fn git_cmd() -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new("git");
+    // Use std::process::Command for the sync check of git exec-path
+    let has_https = std::process::Command::new("git")
+        .args(["--exec-path"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()))
+        .map(|p| p.join("git-remote-https").exists())
+        .unwrap_or(false);
+    if !has_https {
+        // Search common git-core locations under the oil install prefix
+        let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
+        for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
+            if let Some(ref root) = oil_root {
+                let p = root.join(candidate);
+                if p.join("git-remote-https").exists() {
+                    cmd.env("GIT_EXEC_PATH", &p);
+                    break;
+                }
+            }
+        }
+    }
+    cmd
+}
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -316,37 +345,10 @@ impl TapManager {
         })?;
         debug!("Cloning tap from {}", url);
 
-        // ponytail: ensure git-remote-https is findable. Only override GIT_EXEC_PATH
-        // when system git lacks the helper and we have it under the oil prefix.
-        let mut cmd = tokio::process::Command::new("git");
-        cmd.args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()]);
-        // Check whether stock git has remote-https
-        let git_exec = tokio::process::Command::new("git")
-            .args(["--exec-path"])
+        let output = git_cmd()
+            .args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()])
             .output()
-            .await
-            .ok()
-            .filter(|o| o.status.success())
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| std::path::PathBuf::from(s.trim()));
-        let has_https = git_exec
-            .as_ref()
-            .map(|p| p.join("git-remote-https").exists())
-            .unwrap_or(false);
-        if !has_https {
-            // Search common git-core locations under the oil install prefix
-            let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
-            for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
-                if let Some(ref root) = oil_root {
-                    let p = root.join(candidate);
-                    if p.join("git-remote-https").exists() {
-                        cmd.env("GIT_EXEC_PATH", &p);
-                        break;
-                    }
-                }
-            }
-        }
-        let output = cmd.output().await?;
+            .await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -403,7 +405,7 @@ impl TapManager {
                     let needs_repair = if !tap.path.exists() {
                         true
                     } else {
-                        let check = tokio::process::Command::new("git")
+                        let check = git_cmd()
                             .args(["rev-parse", "--git-dir"])
                             .current_dir(&tap.path)
                             .output()
@@ -454,7 +456,7 @@ impl TapManager {
                     )));
                 }
 
-                let fetch_output = tokio::process::Command::new("git")
+                let fetch_output = git_cmd()
                     .args(["fetch", "--depth=1"])
                     .current_dir(&tap.path)
                     .output()
@@ -468,7 +470,7 @@ impl TapManager {
                     )));
                 }
 
-                let reset_output = tokio::process::Command::new("git")
+                let reset_output = git_cmd()
                     .args(["reset", "--hard", "origin/HEAD"])
                     .current_dir(&tap.path)
                     .output()
