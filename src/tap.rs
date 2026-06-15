@@ -3,51 +3,7 @@ use crate::error::{Result, OilError};
 use crate::formula_parser::FormulaParser;
 use crate::ui::dirs;
 use serde::{Deserialize, Serialize};
-/// Create a git Command with GIT_EXEC_PATH set if the stock git lacks remote-https
-/// helpers (e.g. on Chimera where git is installed via oil into a non-standard prefix).
-fn git_cmd() -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("git");
-    // Use std::process::Command for the sync check of git exec-path
-    let has_https = std::process::Command::new("git")
-        .args(["--exec-path"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| PathBuf::from(s.trim()))
-        .map(|p| p.join("git-remote-https").exists())
-        .unwrap_or(false);
-    if !has_https {
-        // Search under oil install prefix and original user's prefix (for doas)
-        let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
-        let mut found = false;
-        if let Some(ref root) = oil_root {
-            for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
-                if root.join(candidate).join("git-remote-https").exists() {
-                    cmd.env("GIT_EXEC_PATH", root.join(candidate));
-                    found = true;
-                    break;
-                }
-            }
-        }
-        if !found && nix::unistd::getuid().is_root() {
-            // When running via doas/sudo, try the original user's oil prefix
-            if let Ok(logname_out) = std::process::Command::new("logname").output() {
-                let user = String::from_utf8_lossy(&logname_out.stdout).trim().to_string();
-                if !user.is_empty() && user != "root" {
-                    let home = PathBuf::from("/home").join(&user).join(".local");
-                    for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
-                        if home.join(candidate).join("git-remote-https").exists() {
-                            cmd.env("GIT_EXEC_PATH", home.join(candidate));
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    cmd
-}
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -361,7 +317,7 @@ impl TapManager {
         })?;
         debug!("Cloning tap from {}", url);
 
-        let output = git_cmd()
+        let output = crate::commands::path::git_cmd()
             .args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()])
             .output()
             .await?;
@@ -421,7 +377,7 @@ impl TapManager {
                     let needs_repair = if !tap.path.exists() {
                         true
                     } else {
-                        let check = git_cmd()
+                        let check = crate::commands::path::git_cmd()
                             .args(["rev-parse", "--git-dir"])
                             .current_dir(&tap.path)
                             .output()
@@ -472,7 +428,7 @@ impl TapManager {
                     )));
                 }
 
-                let fetch_output = git_cmd()
+                let fetch_output = crate::commands::path::git_cmd()
                     .args(["fetch", "--depth=1"])
                     .current_dir(&tap.path)
                     .output()
@@ -486,7 +442,7 @@ impl TapManager {
                     )));
                 }
 
-                let reset_output = git_cmd()
+                let reset_output = crate::commands::path::git_cmd()
                     .args(["reset", "--hard", "origin/HEAD"])
                     .current_dir(&tap.path)
                     .output()

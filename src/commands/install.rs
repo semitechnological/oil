@@ -452,9 +452,8 @@ async fn install_from_head_task(
 
     spinner.set_message(format!("Cloning HEAD from {}...", head_url));
 
-    let clone_output = tokio::process::Command::new("git")
-        .args(["clone", "--depth=1", head_url])
-        .arg(&clone_dir)
+    let clone_output = crate::commands::path::git_cmd()
+        .args(["clone", "--depth=1", head_url, &clone_dir.to_string_lossy()])
         .output()
         .await?;
 
@@ -467,7 +466,7 @@ async fn install_from_head_task(
     }
 
     // Determine a version string from the commit SHA.
-    let sha_output = tokio::process::Command::new("git")
+    let sha_output = crate::commands::path::git_cmd()
         .args(["rev-parse", "--short", "HEAD"])
         .current_dir(&clone_dir)
         .output()
