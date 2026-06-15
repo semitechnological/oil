@@ -12,6 +12,7 @@ pub enum BuildSystem {
     Meson,
     Make,
     Cargo,
+    Vlang,
     Unknown,
 }
 
@@ -257,6 +258,8 @@ impl FormulaParser {
             BuildSystem::Meson
         } else if install_block.contains(r#"system "make""#) {
             BuildSystem::Make
+        } else if install_block.contains(r#"system "v""#) {
+            BuildSystem::Vlang
         } else {
             BuildSystem::Unknown
         }

@@ -76,6 +76,7 @@ impl Builder {
             }
             BuildSystem::Make => self.build_make(&source_dir, install_prefix).await?,
             BuildSystem::Cargo => self.build_cargo(&source_dir, install_prefix).await?,
+            BuildSystem::Vlang => self.build_vlang(&source_dir, install_prefix).await?,
             BuildSystem::Unknown => {
                 return Err(OilError::BuildError(
                     "Unknown build system - cannot build from source".to_string(),
@@ -116,6 +117,7 @@ impl Builder {
             }
             BuildSystem::Make => self.build_make(source_dir, install_prefix).await?,
             BuildSystem::Cargo => self.build_cargo(source_dir, install_prefix).await?,
+            BuildSystem::Vlang => self.build_vlang(source_dir, install_prefix).await?,
             BuildSystem::Unknown => {
                 return Err(OilError::BuildError(
                     "Unknown build system - cannot build from source".to_string(),
@@ -313,6 +315,24 @@ impl Builder {
         self.run_command(source_dir, "cargo", &install_args, "Building")
             .await?;
 
+        Ok(())
+    }
+
+    async fn build_vlang(&self, source_dir: &Path, prefix: &Path) -> Result<()> {
+        info!("Building with V language");
+        let args = vec!["-prod".to_string(), "main.v".to_string()];
+        self.run_command(source_dir, "v", &args, "Building").await?;
+        // Copy the built binary to prefix/bin/
+        let bin_dir = prefix.join("bin");
+        tokio::fs::create_dir_all(&bin_dir).await?;
+        tokio::fs::copy(source_dir.join("main"), bin_dir.join("main")).await?;
+        // Rename to the formula name
+        let formula_name = source_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("app");
+        // Try to rename from the binary name the formula specifies
+        let _ = tokio::fs::rename(bin_dir.join("main"), bin_dir.join("vro")).await;
         Ok(())
     }
 
