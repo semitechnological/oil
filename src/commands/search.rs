@@ -3,9 +3,8 @@ use crate::cask::CaskState;
 use crate::error::Result;
 use crate::install::InstallState;
 use crate::package_spec::Ecosystem;
-use crate::remote_search::{collect_remote_hits, dedupe_remote_by_speed, print_remote_hits};
+use crate::remote_search::{collect_remote_hits, format_remote_hit, format_remote_result};
 use console::style;
-use std::collections::HashSet;
 use tracing::instrument;
 
 fn calculate_match_score(name: &str, desc: Option<&str>, query: &str) -> Option<i32> {
@@ -77,6 +76,7 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
         return Ok(());
     }
 
+    // On Linux with no ecosystem filter, search system registry first
     if cfg!(target_os = "linux") && eco_filter.is_none() {
         return match crate::system::SystemManager::detect().await? {
             Some(mgr) => mgr.search(q, 20).await,
@@ -157,37 +157,18 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
 
     let total = formula_matches.len() + tap_matches.len() + cask_matches.len();
 
-    let brew_blocklist: HashSet<String> = formulae
-        .iter()
-        .map(|f| f.name.to_lowercase())
-        .chain(casks.iter().map(|c| c.token.to_lowercase()))
-        .collect();
-
-    let include_scoop = eco_filter.map(|e| e == Ecosystem::Scoop).unwrap_or(true);
-    let include_choco = eco_filter
-        .map(|e| e == Ecosystem::Chocolatey)
-        .unwrap_or(true);
-    let include_winget = eco_filter.map(|e| e == Ecosystem::Winget).unwrap_or(true);
-
-    let mut remote_hits =
-        collect_remote_hits(cache, q, include_scoop, include_choco, include_winget).await?;
-    remote_hits.retain(|h| !brew_blocklist.contains(&h.id.to_lowercase()));
-    remote_hits = dedupe_remote_by_speed(remote_hits);
+    // Search brew remote index
+    let mut remote_hits = collect_remote_hits(cache, q).await?;
+    remote_hits.retain(|h| {
+        !formulae
+            .iter()
+            .any(|f| f.name.eq_ignore_ascii_case(&h.id))
+            && !casks.iter().any(|c| c.token.eq_ignore_ascii_case(&h.id))
+    });
 
     if total == 0 && remote_hits.is_empty() {
         println!("no results for '{}'", query);
         return Ok(());
-    }
-
-    if !brew_catalog {
-        println!(
-            "{}",
-            style(format!(
-                "Filtered to {} only (drop the prefix to search every catalogue)",
-                eco_filter.unwrap().label()
-            ))
-            .dim()
-        );
     }
 
     if total > 0 {
@@ -302,7 +283,13 @@ pub async fn search(cache: &Cache, query: &str) -> Result<()> {
         println!("\n{}", style(parts.join(", ")).dim());
     }
 
-    print_remote_hits(&remote_hits);
+    // Print remote results
+    if !remote_hits.is_empty() {
+        println!("{}", format_remote_result(&remote_hits));
+        for hit in &remote_hits {
+            println!("{}", format_remote_hit(hit));
+        }
+    }
 
     Ok(())
 }

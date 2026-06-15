@@ -4,7 +4,7 @@ use crate::cask::CaskState;
 use crate::commands::upgrade::{get_outdated_packages, upgrade as run_upgrade};
 use crate::error::{Result, OilError};
 use crate::install::InstallState;
-use crate::windows_state;
+
 use console::style;
 use inquire::{Confirm, Select};
 use std::collections::HashMap;
@@ -152,20 +152,6 @@ async fn collect_installed_rows(_cache: &Cache) -> Result<Vec<InstalledRow>> {
         });
     }
 
-    for manifest in windows_state::list_manifests()? {
-        let line = format!(
-            "{} {} {}",
-            style(format!("{}/{}", manifest.ecosystem.label(), manifest.id)).magenta(),
-            style(&manifest.version).dim(),
-            style("(windows)").yellow()
-        );
-        rows.push(InstalledRow {
-            name: manifest.id,
-            line,
-            is_cask: false,
-            is_windows: true,
-        });
-    }
 
     rows.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(rows)
@@ -354,7 +340,7 @@ async fn run_interactive_list(cache: &Cache, initial_query: Option<String>) -> R
     Ok(())
 }
 
-/// Plain-text listing of packages that have upgrades available (winget-style `--upgradable`).
+/// Plain-text listing of packages that have upgrades available (`--upgradable`).
 async fn list_upgradable(cache: &Cache) -> Result<()> {
     let outdated = get_outdated_packages(cache).await?;
     if outdated.is_empty() {

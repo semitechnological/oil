@@ -1291,35 +1291,20 @@ pub fn homebrew_prefix() -> PathBuf {
         }
     }
 
-    let os = std::env::consts::OS;
-    let arch = std::env::consts::ARCH;
-
-    let standard_prefix = match os {
-        "macos" => match arch {
-            "aarch64" => PathBuf::from("/opt/homebrew"),
-            _ => PathBuf::from("/usr/local"),
-        },
-        "linux" => {
-            let linuxbrew = PathBuf::from("/home/linuxbrew/.linuxbrew");
-            if linuxbrew.join("Cellar").exists() {
-                linuxbrew
-            } else if let Some(user_lb) =
-                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".linuxbrew"))
-            {
-                if user_lb.join("Cellar").exists() {
-                    user_lb
-                } else if PathBuf::from("/usr/local").join("Cellar").exists() {
-                    PathBuf::from("/usr/local")
-                } else {
-                    linuxbrew
-                }
-            } else if PathBuf::from("/usr/local").join("Cellar").exists() {
-                PathBuf::from("/usr/local")
-            } else {
-                linuxbrew
-            }
+    // Linuxbrew (Homebrew on Linux) only
+    let linuxbrew = PathBuf::from("/home/linuxbrew/.linuxbrew");
+    let standard_prefix = if linuxbrew.join("Cellar").exists() {
+        linuxbrew
+    } else if let Some(user_lb) =
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".linuxbrew"))
+    {
+        if user_lb.join("Cellar").exists() {
+            user_lb
+        } else {
+            linuxbrew
         }
-        _ => PathBuf::from("/usr/local"),
+    } else {
+        linuxbrew
     };
 
     if let Some(prefix_str) = run_command_with_timeout("brew", &["--prefix"], 2) {
@@ -1354,9 +1339,8 @@ pub fn managed_homebrew_prefix() -> Option<PathBuf> {
     }
 
     [
-        PathBuf::from("/opt/homebrew"),
-        PathBuf::from("/usr/local"),
         PathBuf::from("/home/linuxbrew/.linuxbrew"),
+        PathBuf::from("/usr/local"),
     ]
     .into_iter()
     .find(|candidate| candidate.join("Cellar").exists())

@@ -1,14 +1,11 @@
-//! Route `wax install` to Homebrew-style formulae, Scoop, winget-pkgs portable zips,
-//! or Chocolatey `.nupkg` tools, including bang prefixes and automatic source pick.
+//! Route `wax install` to Homebrew-style formulae (Linuxbrew).
 
 use crate::cache::Cache;
-use crate::chocolatey;
 use crate::error::{Result, OilError};
 use crate::package_spec::{Ecosystem, PackageSpec};
-use crate::scoop;
-use crate::winget_install;
 
-/// Returns `true` if this package was fully handled (no Homebrew batch needed).
+/// Returns `true` if this package was fully handled (no batch install needed).
+/// On Linux, only brew/ prefix forces Homebrew. Everything else is a system install.
 pub async fn install_one_qualified(
     cache: &Cache,
     raw: &str,
@@ -22,7 +19,9 @@ pub async fn install_one_qualified(
         return Ok(false);
     }
 
-    if spec.force == Some(Ecosystem::Brew) {
+    // If explicitly brew, route to Homebrew-style install (not handled here)
+    if spec.force == Some(Ecosystem::Brew) || !cfg!(target_os = "windows") {
+        let _ = cache;
         return Ok(false);
     }
 
@@ -31,26 +30,10 @@ pub async fn install_one_qualified(
         return Ok(true);
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(eco) = auto_pick_ecosystem(cache, &spec.name).await? {
-            if eco == Ecosystem::Brew {
-                return Ok(false);
-            }
-            install_forced(eco, &spec.name, dry_run).await?;
-            return Ok(true);
-        }
-        return Err(OilError::FormulaNotFound(format!(
-            "no matching package '{}' in brew index, Scoop Main, winget-pkgs, or Chocolatey",
-            spec.name
-        )));
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = cache;
-        Ok(false)
-    }
+    Err(OilError::FormulaNotFound(format!(
+        "no matching package '{}' in brew index",
+        spec.name
+    )))
 }
 
 fn validate_qualified_inner(spec: &PackageSpec) -> Result<()> {
@@ -62,7 +45,7 @@ fn validate_qualified_inner(spec: &PackageSpec) -> Result<()> {
     }
     if spec.force.is_some() && n.contains('/') {
         return Err(OilError::InvalidInput(
-            "names with '/' after a scoop/choco/winget/brew prefix are not supported".into(),
+            "names with '/' after a brew prefix are not supported".into(),
         ));
     }
     if !n.chars().all(|c| c.is_alphanumeric() || "-_.+".contains(c)) {
@@ -81,43 +64,5 @@ async fn install_forced(eco: Ecosystem, name: &str, dry_run: bool) -> Result<()>
 
     match eco {
         Ecosystem::Brew => Ok(()),
-        Ecosystem::Scoop => scoop::install_from_bucket(name, None).await,
-        Ecosystem::Winget => winget_install::install_winget_package(name).await,
-        Ecosystem::Chocolatey => chocolatey::install_portable_tools(name).await,
     }
-}
-
-#[cfg(target_os = "windows")]
-async fn auto_pick_ecosystem(cache: &Cache, name: &str) -> Result<Option<Ecosystem>> {
-    let formulae = cache.load_all_formulae().await?;
-    let brew_hit = formulae.iter().any(|f| f.name.eq_ignore_ascii_case(name));
-
-    let scoop_f = scoop::scoop_manifest_exists(scoop::DEFAULT_BUCKET_BASE, name);
-    let choco_f = chocolatey::package_exists(name);
-    let winget_f = async {
-        if name.contains('.') {
-            winget_install::winget_package_exists(name).await
-        } else {
-            false
-        }
-    };
-
-    let (scoop_ok, choco_ok, winget_ok) = tokio::join!(scoop_f, choco_f, winget_f);
-
-    let mut opts: Vec<(Ecosystem, u8)> = Vec::new();
-    if brew_hit {
-        opts.push((Ecosystem::Brew, Ecosystem::Brew.speed_rank()));
-    }
-    if scoop_ok {
-        opts.push((Ecosystem::Scoop, Ecosystem::Scoop.speed_rank()));
-    }
-    if winget_ok {
-        opts.push((Ecosystem::Winget, Ecosystem::Winget.speed_rank()));
-    }
-    if choco_ok {
-        opts.push((Ecosystem::Chocolatey, Ecosystem::Chocolatey.speed_rank()));
-    }
-
-    opts.sort_by_key(|(_, r)| *r);
-    Ok(opts.first().map(|(e, _)| *e))
 }

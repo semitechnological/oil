@@ -295,10 +295,37 @@ impl SystemManager {
             .filter_map(|pkg| index.find(crate::system::registry::parse_dep_name(pkg)))
             .map(|pkg| pkg.name.clone())
             .collect();
+
+        // ponytail: skip requested packages that are already on the host system
+        let already_hosted: HashSet<&str> = packages
+            .iter()
+            .filter(|pkg| self.host_package_installed(pkg))
+            .map(|s| s.as_str())
+            .collect();
+        if !already_hosted.is_empty() {
+            for pkg in &already_hosted {
+                println!(
+                    "{} {} already installed via {}",
+                    style("✓").green(),
+                    style(pkg).magenta(),
+                    self.pm.name()
+                );
+            }
+            let remaining: Vec<&String> = packages
+                .iter()
+                .filter(|p| !already_hosted.contains(p.as_str()))
+                .collect();
+            if remaining.is_empty() {
+                return Ok(());
+            }
+        }
+
         let resolved: Vec<&PackageMetadata> = resolved
             .into_iter()
             .filter(|pkg| {
-                requested_concrete.contains(&pkg.name) || !self.host_package_installed(&pkg.name)
+                (requested_concrete.contains(&pkg.name)
+                    && !already_hosted.contains(pkg.name.as_str()))
+                    || !self.host_package_installed(&pkg.name)
             })
             .collect();
 
@@ -374,6 +401,22 @@ impl SystemManager {
             println!("+ {}@{}", style(name).magenta(), style(version).dim());
         }
         println!("{} snapshot gen-{}", style("→").cyan(), style(gen.id).dim());
+
+        // ponytail: after install, link oil itself if needed and hint about PATH
+        crate::commands::path::ensure_self_linked();
+        let bin_dir = crate::commands::path::oil_bin_dir();
+        let bin_str = bin_dir.to_string_lossy();
+        let path_ok = std::env::var("PATH")
+            .map(|p| p.split(':').any(|d| d == bin_str.as_ref()))
+            .unwrap_or(false);
+        if !path_ok {
+            println!(
+                "{} add '{}' to your PATH  (or run: eval \"$(oil path)\")",
+                style("→").cyan(),
+                bin_str
+            );
+        }
+
         Ok(())
     }
 

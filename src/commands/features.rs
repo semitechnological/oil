@@ -11,16 +11,6 @@ struct Feature {
 
 const FEATURES: &[Feature] = &[
     Feature {
-        name: "rest-sources",
-        description: "Add/query package sources via a REST API (winget source compat)",
-        env_var: "WAX_FEATURE_REST_SOURCES",
-    },
-    Feature {
-        name: "winget-import",
-        description: "Import packages from a winget-format JSON export file",
-        env_var: "WAX_FEATURE_WINGET_IMPORT",
-    },
-    Feature {
         name: "parallel-downloads",
         description: "Download multiple packages concurrently (enabled by default)",
         env_var: "WAX_FEATURE_PARALLEL_DOWNLOADS",

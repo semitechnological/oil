@@ -179,6 +179,7 @@ impl SystemInstaller {
         for (_, _, _, _, files, _) in &mut manifest_data {
             wrap_prefix_commands(prefix, files, &all_files)?;
         }
+        link_wrappers_to_bin(prefix, &all_files)?;
 
         if run_scripts {
             for (_, name, _, package_path, _, _) in &manifest_data {
@@ -230,6 +231,11 @@ impl SystemInstaller {
             if !prefix.trim().is_empty() {
                 return std::path::PathBuf::from(prefix);
             }
+        }
+
+        // ponytail: when root (doas/sudo), use /usr/local so binaries land in PATH
+        if nix::unistd::getuid().is_root() {
+            return std::path::PathBuf::from("/usr/local");
         }
 
         if let Ok(home) = std::env::var("HOME") {
@@ -315,6 +321,37 @@ fn wrap_prefix_commands(
     }
 
     files.extend(additions);
+    Ok(())
+}
+
+/// Symlink wrapper scripts from subdirectories (usr/bin, sbin, usr/sbin) up to bin/
+/// so they're on the user's PATH without needing every subdirectory.
+fn link_wrappers_to_bin(prefix: &Path, files: &[PathBuf]) -> Result<()> {
+    let bin_dir = prefix.join("bin");
+    let subdirs = ["usr/bin", "sbin", "usr/sbin"];
+
+    for file in files {
+        let Ok(relative) = file.strip_prefix(prefix) else {
+            continue;
+        };
+        let Some(parent) = relative.parent() else {
+            continue;
+        };
+        let parent_str = parent.to_string_lossy();
+        if !subdirs.contains(&parent_str.as_ref()) {
+            continue;
+        }
+        let Some(name) = file.file_name() else {
+            continue;
+        };
+        let link = bin_dir.join(name);
+        if link.exists() {
+            continue;
+        }
+        std::fs::create_dir_all(&bin_dir)?;
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(file, &link);
+    }
     Ok(())
 }
 

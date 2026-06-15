@@ -15,7 +15,7 @@ use crate::signal::{
 use crate::tap::TapManager;
 use crate::ui::{PROGRESS_BAR_CHARS, PROGRESS_BAR_TEMPLATE, SPINNER_TICK_CHARS};
 use crate::version::{is_same_or_newer, OIL_VERSION};
-use crate::windows_state;
+
 use console::style;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::{HashMap, HashSet};
@@ -91,8 +91,6 @@ pub async fn upgrade(cache: &Cache, packages: &[String], dry_run: bool) -> Resul
         for package in packages {
             if let Err(e) = if package == "oil" {
                 upgrade_single(cache, package, dry_run).await
-            } else if let Some(manifest) = windows_state::find_manifest(package)? {
-                upgrade_windows_package(cache, package, &manifest, dry_run).await
             } else if installed_casks.contains_key(package) {
                 upgrade_cask_single(cache, package, dry_run).await
             } else {
@@ -117,32 +115,6 @@ pub async fn upgrade(cache: &Cache, packages: &[String], dry_run: bool) -> Resul
         }
         Ok(())
     }
-}
-
-async fn upgrade_windows_package(
-    cache: &Cache,
-    raw: &str,
-    manifest: &windows_state::WindowsPackageManifest,
-    dry_run: bool,
-) -> Result<()> {
-    let qualified = format!("{}/{}", manifest.ecosystem.label(), manifest.id);
-    if dry_run {
-        println!(
-            "dry-run: would upgrade {}@{} via {}",
-            style(&qualified).magenta(),
-            style(&manifest.version).dim(),
-            manifest.ecosystem.label()
-        );
-        return Ok(());
-    }
-
-    let target = if crate::package_spec::parse_package_spec(raw).force.is_some() {
-        raw.to_string()
-    } else {
-        qualified
-    };
-    ecosystem_install::install_one_qualified(cache, &target, false, false).await?;
-    Ok(())
 }
 
 async fn refresh_taps(cache: &Cache) -> Result<()> {

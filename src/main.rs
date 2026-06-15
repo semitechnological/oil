@@ -3,7 +3,6 @@ mod bottle;
 mod builder;
 mod cache;
 mod cask;
-mod chocolatey;
 mod commands;
 mod deps;
 mod discovery;
@@ -14,7 +13,6 @@ mod install;
 mod lockfile;
 mod package_spec;
 mod remote_search;
-mod scoop;
 mod signal;
 mod sudo;
 mod system;
@@ -23,8 +21,6 @@ mod tap;
 mod timing;
 mod ui;
 mod version;
-mod windows_state;
-mod winget_install;
 
 use api::ApiClient;
 use cache::Cache;
@@ -49,6 +45,7 @@ fn should_refresh_state(command: &Commands) -> bool {
             | Commands::SelfUpdate { .. }
             | Commands::Upgrade { .. }
             | Commands::System { .. }
+            | Commands::Path
             | Commands::Lock
             | Commands::Sync
             | Commands::Link { .. }
@@ -123,7 +120,7 @@ async fn run_self_update(nightly: bool, force: bool, clean: bool, no_clean: bool
 #[command(about = format!("oil v{} - native system package manager", OIL_VERSION), long_about = None)]
 #[command(subcommand_required = false)]
 struct Cli {
-    /// Print wax version, paths, and active taps (read-only; winget-style --info)
+    /// Print oil version, paths, and active taps (read-only)
     #[arg(long, global = true)]
     info: bool,
 
@@ -195,7 +192,7 @@ enum Commands {
     },
 
     #[command(
-        about = "Search formulae, casks, and Windows catalogues (scoop/choco/winget). Prefix scoop/, choco/, chocolatey/, winget/, or brew/ to filter  [alias: s, find]"
+        about = "Search formulae, casks, and brew index  [alias: s, find]"
     )]
     #[command(visible_alias = "s")]
     #[command(alias = "find")]
@@ -223,13 +220,13 @@ enum Commands {
     },
 
     #[command(
-        about = "Install formulae/casks or Windows portables (auto-picks fastest source on Windows). Use scoop/pkg, choco/pkg, winget/Id.SubId, or brew/pkg  [alias: i, add]"
+        about = "Install formulae/casks or system packages  [alias: i, add]"
     )]
     #[command(visible_alias = "i")]
     #[command(alias = "add")]
     Install {
         #[arg(
-            help = "Package name(s); optional prefix scoop/, choco/, chocolatey/, winget/, brew/ (Windows auto-resolve if omitted)"
+            help = "Package name(s); prefix brew/ for Linuxbrew formulae, or plain name for auto-detect"
         )]
         packages: Vec<String>,
         #[arg(long)]
@@ -394,6 +391,10 @@ enum Commands {
 
     #[command(about = "Show oil installation info (paths, version, active taps)")]
     OilInfo,
+
+    #[command(about = "Print PATH export for oil's bin directory [alias: env]")]
+    #[command(visible_alias = "env")]
+    Path,
 
     #[command(about = "Generate lockfile from installed packages")]
     Lock,
@@ -924,6 +925,7 @@ async fn main() -> Result<()> {
         }
         Commands::Audit => commands::audit::audit(&cache).await,
         Commands::Features => commands::features::features(),
+                Commands::Path => commands::path::oil_path(),
                 Commands::OilInfo => commands::oil_info::oil_info(),
     };
 

@@ -1,5 +1,6 @@
 pub mod audit;
 pub mod bundle;
+pub mod path;
 pub mod cleanup;
 pub mod completions;
 pub mod doctor;

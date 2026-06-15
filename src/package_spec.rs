@@ -1,5 +1,4 @@
-//! Qualified package names: `scoop/ripgrep`, `choco/git`, `winget/JesseDuffield.lazygit`,
-//! `brew/openssl` (force Homebrew), or plain `ripgrep` for automatic source selection.
+//! Qualified package names: `brew/openssl` (force Linuxbrew) or plain `ripgrep` for auto.
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -7,12 +6,6 @@
 pub enum Ecosystem {
     /// Local Homebrew-style index (fastest: cached JSON).
     Brew,
-    /// Scoop Main-style JSON manifest + zip/tar.gz portable.
-    Scoop,
-    /// winget-pkgs YAML portable zip installers.
-    Winget,
-    /// Chocolatey community `.nupkg` (portable `tools/*.exe` only).
-    Chocolatey,
 }
 
 impl Ecosystem {
@@ -20,18 +13,12 @@ impl Ecosystem {
     pub fn speed_rank(self) -> u8 {
         match self {
             Ecosystem::Brew => 0,
-            Ecosystem::Scoop => 1,
-            Ecosystem::Winget => 2,
-            Ecosystem::Chocolatey => 3,
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
             Ecosystem::Brew => "brew",
-            Ecosystem::Scoop => "scoop",
-            Ecosystem::Winget => "winget",
-            Ecosystem::Chocolatey => "choco",
         }
     }
 }
@@ -44,14 +31,10 @@ pub struct PackageSpec {
     pub name: String,
 }
 
-/// Parse `chocolatey/foo`, `choco/foo`, `scoop/foo`, `winget/foo`, `brew/foo`, `homebrew/foo`.
+/// Parse `brew/foo`, `homebrew/foo`.
 pub fn parse_package_spec(raw: &str) -> PackageSpec {
     let lower = raw.to_lowercase();
     const PAIRS: &[(&str, Ecosystem)] = &[
-        ("chocolatey/", Ecosystem::Chocolatey),
-        ("choco/", Ecosystem::Chocolatey),
-        ("scoop/", Ecosystem::Scoop),
-        ("winget/", Ecosystem::Winget),
         ("brew/", Ecosystem::Brew),
         ("homebrew/", Ecosystem::Brew),
     ];
@@ -81,8 +64,8 @@ mod tests {
 
     #[test]
     fn parses_bangs_case_insensitive_prefix() {
-        let s = parse_package_spec("Scoop/RipGrep");
-        assert_eq!(s.force, Some(Ecosystem::Scoop));
+        let s = parse_package_spec("Brew/RipGrep");
+        assert_eq!(s.force, Some(Ecosystem::Brew));
         assert_eq!(s.name, "RipGrep");
     }
 
@@ -95,18 +78,13 @@ mod tests {
 
     #[test]
     fn parse_search_query_strips_known_prefixes() {
-        let (f, q) = parse_search_query("choco/git");
-        assert_eq!(f, Some(Ecosystem::Chocolatey));
-        assert_eq!(q, "git");
-        let (f, q) = parse_search_query("winget/Microsoft.WindowsTerminal");
-        assert_eq!(f, Some(Ecosystem::Winget));
-        assert_eq!(q, "Microsoft.WindowsTerminal");
+        let (f, q) = parse_search_query("brew/openssl");
+        assert_eq!(f, Some(Ecosystem::Brew));
+        assert_eq!(q, "openssl");
     }
 
     #[test]
     fn speed_rank_orders_fastest_first() {
-        assert!(Ecosystem::Brew.speed_rank() < Ecosystem::Scoop.speed_rank());
-        assert!(Ecosystem::Scoop.speed_rank() < Ecosystem::Winget.speed_rank());
-        assert!(Ecosystem::Winget.speed_rank() < Ecosystem::Chocolatey.speed_rank());
+        assert_eq!(Ecosystem::Brew.speed_rank(), 0);
     }
 }

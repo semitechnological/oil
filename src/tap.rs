@@ -316,14 +316,22 @@ impl TapManager {
         })?;
         debug!("Cloning tap from {}", url);
 
-        let output = tokio::process::Command::new("git")
-            .arg("clone")
-            .arg("--depth=1")
-            .arg("--single-branch")
-            .arg(&url)
-            .arg(&tap.path)
-            .output()
-            .await?;
+        // ponytail: ensure git-remote-https is findable — check under oil prefix
+        // for git-core helpers when system git doesn't have them (e.g. APK on Chimera)
+        let mut cmd = tokio::process::Command::new("git");
+        cmd.args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()]);
+        // Search common git-core locations under the oil install prefix
+        let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
+        for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
+            if let Some(ref root) = oil_root {
+                let p = root.join(candidate);
+                if p.join("git-remote-https").exists() {
+                    cmd.env("GIT_EXEC_PATH", &p);
+                    break;
+                }
+            }
+        }
+        let output = cmd.output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
