@@ -261,10 +261,12 @@ impl InstallState {
         }
 
         if let Ok(home) = dirs::home_dir() {
-            let wax_user_cellar = home.join(".local/wax/Cellar");
-            if wax_user_cellar.exists() {
-                self.scan_cellar_and_update(&wax_user_cellar, &mut packages)
-                    .await?;
+            for cellar_sub in ["oil/Cellar", "wax/Cellar"] {
+                let user_cellar = home.join(".local").join(cellar_sub);
+                if user_cellar.exists() {
+                    self.scan_cellar_and_update(&user_cellar, &mut packages)
+                        .await?;
+                }
             }
         }
 

@@ -18,14 +18,30 @@ fn git_cmd() -> tokio::process::Command {
         .map(|p| p.join("git-remote-https").exists())
         .unwrap_or(false);
     if !has_https {
-        // Search common git-core locations under the oil install prefix
+        // Search under oil install prefix and original user's prefix (for doas)
         let oil_root = crate::commands::path::oil_bin_dir().parent().map(|p| p.to_path_buf());
-        for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
-            if let Some(ref root) = oil_root {
-                let p = root.join(candidate);
-                if p.join("git-remote-https").exists() {
-                    cmd.env("GIT_EXEC_PATH", &p);
+        let mut found = false;
+        if let Some(ref root) = oil_root {
+            for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
+                if root.join(candidate).join("git-remote-https").exists() {
+                    cmd.env("GIT_EXEC_PATH", root.join(candidate));
+                    found = true;
                     break;
+                }
+            }
+        }
+        if !found && nix::unistd::getuid().is_root() {
+            // When running via doas/sudo, try the original user's oil prefix
+            if let Ok(logname_out) = std::process::Command::new("logname").output() {
+                let user = String::from_utf8_lossy(&logname_out.stdout).trim().to_string();
+                if !user.is_empty() && user != "root" {
+                    let home = PathBuf::from("/home").join(&user).join(".local");
+                    for candidate in ["usr/libexec/git-core", "usr/lib/git-core", "libexec/git-core"] {
+                        if home.join(candidate).join("git-remote-https").exists() {
+                            cmd.env("GIT_EXEC_PATH", home.join(candidate));
+                            break;
+                        }
+                    }
                 }
             }
         }
