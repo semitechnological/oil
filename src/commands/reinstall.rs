@@ -53,10 +53,14 @@ pub async fn reinstall(cache: &Cache, packages: &[String], cask: bool, all: bool
         .iter()
         .map(String::as_str)
         .filter(|name| {
+            let short = name.split('/').next_back().unwrap_or(name);
             if cask {
-                !installed_casks.contains_key(*name)
+                !installed_casks.contains_key(*name) && !installed_casks.contains_key(short)
             } else {
-                !installed.contains_key(*name) && !installed_casks.contains_key(*name)
+                !installed.contains_key(*name)
+                    && !installed.contains_key(short)
+                    && !installed_casks.contains_key(*name)
+                    && !installed_casks.contains_key(short)
             }
         })
         .collect();

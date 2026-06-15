@@ -857,7 +857,13 @@ async fn install_impl(
     let mut user_direct_formula_names: HashSet<String> = HashSet::new();
 
     for package_name in &resolved_formula_packages {
-        if installed.contains(package_name.as_str()) {
+        if installed.contains(package_name.as_str())
+            || package_name
+                .split('/')
+                .next_back()
+                .map(|short| installed.contains(short))
+                .unwrap_or(false)
+        {
             already_installed.push(package_name.clone());
             continue;
         }
