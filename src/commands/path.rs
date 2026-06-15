@@ -35,11 +35,31 @@ pub fn oil_bin_dir() -> PathBuf {
     oil_bin_dirs().into_iter().next().unwrap_or_else(|| PathBuf::from("/usr/local/bin"))
 }
 
+/// Find the git binary: check oil prefix first, then system PATH.
+fn find_git() -> PathBuf {
+    // Check oil prefix bin dirs first (git installed via oil)
+    for dir in oil_bin_dirs() {
+        let candidate = dir.join("git");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    // Also check usr/bin under the prefix (APK-style installs)
+    if let Some(root) = oil_bin_dir().parent() {
+        let candidate = root.join("usr/bin/git");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    PathBuf::from("git")
+}
+
 /// Create a git Command configured with GIT_EXEC_PATH if stock git lacks remote-https.
 /// Works under doas/sudo by checking the original user's oil prefix.
 pub fn git_cmd() -> tokio::process::Command {
-    let mut cmd = tokio::process::Command::new("git");
-    let has_https = std::process::Command::new("git")
+    let git_path = find_git();
+    let mut cmd = tokio::process::Command::new(&git_path);
+    let has_https = std::process::Command::new(&git_path)
         .args(["--exec-path"])
         .output()
         .ok()
