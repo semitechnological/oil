@@ -241,7 +241,7 @@ jobs:
       - name: Install system deps (Alpine)
         if: contains(matrix.container, 'alpine')
         run: |
-          apk add curl gcc g++ pkgconfig openssl-dev musl-dev
+          apk add bash curl gcc g++ pkgconfig openssl-dev musl-dev
 
       - name: Install cross-compilation tools (ARM64)
         if: matrix.arch == 'arm64'
@@ -252,6 +252,11 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+        env:
+          HOME: /root
+
+      - name: Set default toolchain
+        run: rustup default stable
         env:
           HOME: /root
 
