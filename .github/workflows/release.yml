@@ -220,6 +220,8 @@ jobs:
             container: alpine:latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install system deps (Debian)
         if: contains(matrix.container, 'ubuntu')
         run: |
@@ -253,6 +255,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+        env:
+          HOME: /root
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
