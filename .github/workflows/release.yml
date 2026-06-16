@@ -247,9 +247,6 @@ jobs:
         if: matrix.arch == 'arm64'
         run: |
           apt-get install -y gcc-aarch64-linux-gnu
-          mkdir -p .cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> .cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> .cargo/config.toml
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -257,6 +254,13 @@ jobs:
           targets: ${{ matrix.target }}
         env:
           HOME: /root
+
+      - name: Create ARM64 cargo config
+        if: matrix.arch == 'arm64'
+        run: |
+          mkdir -p /root/.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> /root/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> /root/.cargo/config.toml
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
