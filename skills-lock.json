@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "zig-cinterop": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "skillPath": "skills/zig/zig-cinterop/SKILL.md",
+      "computedHash": "b22168c5c578a5e3d99574f5a26ac710ced9c5867669e84bb1a2037ec0d2c813"
+    },
+    "zig-debugging": {
+      "source": "mohitmishra786/low-level-dev-skills",
+      "sourceType": "github",
+      "skillPath": "skills/zig/zig-debugging/SKILL.md",
+      "computedHash": "bfad91d4d6301941a53c388766827971c2c18eb4525bd60b6e0824f11c4a3897"
+    }
+  }
+}
