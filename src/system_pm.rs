@@ -7,6 +7,7 @@
 use crate::error::{Result, OilError};
 
 use std::path::Path;
+use std::process::Command as StdCommand;
 use tokio::process::Command;
 use tracing::debug;
 
@@ -200,6 +201,80 @@ impl SystemPm {
             cask_name
         )))
     }
+
+    pub fn package_installed(&self, package: &str) -> bool {
+        let mut cmd = match self {
+            Self::Brew => {
+                let mut cmd = StdCommand::new("brew");
+                cmd.args(["list", "--versions", package]);
+                cmd
+            }
+            Self::Apt => {
+                let mut cmd = StdCommand::new("dpkg-query");
+                cmd.args(["-W", "-f=${Status}", package]);
+                cmd
+            }
+            Self::Dnf | Self::Yum | Self::Zypper => {
+                let mut cmd = StdCommand::new("rpm");
+                cmd.args(["-q", package]);
+                cmd
+            }
+            Self::Pacman => {
+                let mut cmd = StdCommand::new("pacman");
+                cmd.args(["-Q", package]);
+                cmd
+            }
+            Self::Apk => {
+                let mut cmd = StdCommand::new("apk");
+                cmd.args(["info", "-e", package]);
+                cmd
+            }
+            Self::Xbps => {
+                let mut cmd = StdCommand::new("xbps-query");
+                cmd.args(["-l", package]);
+                cmd
+            }
+            Self::Nix => {
+                let mut cmd = StdCommand::new("nix-env");
+                cmd.args(["-q", package]);
+                cmd
+            }
+            Self::Emerge => return false,
+        };
+
+        cmd.output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    pub fn dependency_satisfied(&self, dependency: &str) -> bool {
+        match self {
+            Self::Dnf | Self::Yum | Self::Zypper => {
+                let mut cmd = StdCommand::new("rpm");
+                cmd.args(["-q", "--whatprovides", dependency]);
+                cmd.output()
+                    .map(|output| output.status.success())
+                    .unwrap_or(false)
+            }
+            _ => self.package_installed(dependency),
+        }
+    }
+}
+
+/// Whether `package` is installed by the detected host package manager (apt, rpm, apk, …).
+pub async fn package_installed_on_host(package: &str) -> bool {
+    let Some(pm) = SystemPm::detect().await else {
+        return false;
+    };
+    pm.package_installed(package)
+}
+
+/// Whether a dependency name is already satisfied on the host (rpm provides, else package name).
+pub async fn host_dependency_satisfied(dependency: &str) -> bool {
+    let Some(pm) = SystemPm::detect().await else {
+        return false;
+    };
+    pm.dependency_satisfied(dependency)
 }
 
 /// Check if a binary exists on PATH.

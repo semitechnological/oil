@@ -26,7 +26,6 @@ use crate::system::state::SystemState;
 use crate::system_pm::SystemPm;
 use console::style;
 use std::collections::{HashMap, HashSet};
-use std::process::Command;
 
 pub struct SystemManager {
     pm: SystemPm,
@@ -421,59 +420,11 @@ impl SystemManager {
     }
 
     fn host_dependency_satisfied(&self, dependency: &str) -> bool {
-        let mut cmd = match self.pm {
-            SystemPm::Dnf | SystemPm::Yum => {
-                let mut cmd = Command::new("rpm");
-                cmd.args(["-q", "--whatprovides", dependency]);
-                cmd
-            }
-            _ => return self.host_package_installed(dependency),
-        };
-
-        cmd.output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        self.pm.dependency_satisfied(dependency)
     }
 
     fn host_package_installed(&self, package: &str) -> bool {
-        let mut cmd = match self.pm {
-            SystemPm::Apt => {
-                let mut cmd = Command::new("dpkg-query");
-                cmd.args(["-W", "-f=${Status}", package]);
-                cmd
-            }
-            SystemPm::Dnf | SystemPm::Yum => {
-                let mut cmd = Command::new("rpm");
-                cmd.args(["-q", package]);
-                cmd
-            }
-            SystemPm::Pacman => {
-                let mut cmd = Command::new("pacman");
-                cmd.args(["-Q", package]);
-                cmd
-            }
-            SystemPm::Apk => {
-                let mut cmd = Command::new("apk");
-                cmd.args(["info", "-e", package]);
-                cmd
-            }
-            SystemPm::Xbps => {
-                let mut cmd = Command::new("xbps-query");
-                cmd.args(["-l", package]);
-                cmd
-            }
-            #[cfg(any(feature = "system-nix", feature = "system-all"))]
-            SystemPm::Nix => {
-                let mut cmd = Command::new("nix-env");
-                cmd.args(["-q", package]);
-                cmd
-            }
-            _ => return false,
-        };
-
-        cmd.output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        self.pm.package_installed(package)
     }
 
     async fn load_registry(&self) -> Result<PackageIndex> {

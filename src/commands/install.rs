@@ -8,7 +8,7 @@ use crate::cask::{
     detect_artifact_type, CaskInstaller, CaskState, InstalledCask, RollbackContext, StagingContext,
 };
 use crate::commands::version_install;
-use crate::deps::resolve_dependencies;
+use crate::deps::{resolve_dependencies, resolve_dependencies_with_satisfied};
 use crate::discovery::discover_manually_installed_casks;
 use crate::error::{Result, OilError};
 use crate::formula_parser::{BuildSystem, FormulaParser};
@@ -855,6 +855,7 @@ async fn install_impl(
     let mut errors = Vec::new();
     let mut detected_casks: Vec<String> = Vec::new();
     let mut user_direct_formula_names: HashSet<String> = HashSet::new();
+    let host_pm = SystemPm::detect().await;
 
     for package_name in &resolved_formula_packages {
         if installed.contains(package_name.as_str())
@@ -866,6 +867,22 @@ async fn install_impl(
         {
             already_installed.push(package_name.clone());
             continue;
+        }
+
+        let host_name = package_name.split('/').next_back().unwrap_or(package_name.as_str());
+        if let Some(ref pm) = host_pm {
+            if pm.package_installed(host_name) {
+                if !quiet {
+                    println!(
+                        "{} {} already installed via {}",
+                        style("✓").green(),
+                        style(package_name).magenta(),
+                        pm.name()
+                    );
+                }
+                already_installed.push(package_name.clone());
+                continue;
+            }
         }
 
         let formula = if package_name.contains('/') {
@@ -944,7 +961,12 @@ async fn install_impl(
             }
         };
 
-        match resolve_dependencies(formula, &formulae, &installed) {
+        match resolve_dependencies_with_satisfied(formula, &formulae, &installed, |dep| {
+            host_pm
+                .as_ref()
+                .map(|pm| pm.dependency_satisfied(dep))
+                .unwrap_or(false)
+        }) {
             Ok(deps) => {
                 user_direct_formula_names.insert(formula.name.clone());
                 for dep in deps {

@@ -86,16 +86,30 @@ pub fn resolve_dependencies(
     formulae: &[Formula],
     installed: &HashSet<String>,
 ) -> Result<Vec<String>> {
+    resolve_dependencies_with_satisfied(formula, formulae, installed, |_| false)
+}
+
+pub fn resolve_dependencies_with_satisfied<F>(
+    formula: &Formula,
+    formulae: &[Formula],
+    installed: &HashSet<String>,
+    mut satisfied: F,
+) -> Result<Vec<String>>
+where
+    F: FnMut(&str) -> bool,
+{
     debug!("Resolving dependencies for {}", formula.name);
 
     let mut graph = DependencyGraph::new();
     let mut visited = HashSet::new();
     let mut queue = VecDeque::new();
 
+    let mut is_satisfied = |name: &str| installed.contains(name) || satisfied(name);
+
     queue.push_back(formula.name.clone());
 
     while let Some(name) = queue.pop_front() {
-        if visited.contains(&name) || installed.contains(&name) {
+        if visited.contains(&name) || is_satisfied(&name) {
             continue;
         }
         visited.insert(name.clone());
@@ -110,7 +124,7 @@ pub fn resolve_dependencies(
         graph.add_node(name.clone(), deps.clone());
 
         for dep in deps {
-            if !installed.contains(&dep) {
+            if !is_satisfied(&dep) {
                 queue.push_back(dep);
             }
         }
@@ -120,7 +134,7 @@ pub fn resolve_dependencies(
 
     let to_install: Vec<String> = sorted
         .into_iter()
-        .filter(|name| !installed.contains(name))
+        .filter(|name| !is_satisfied(name))
         .collect();
 
     debug!("Packages to install: {:?}", to_install);
