@@ -140,3 +140,63 @@ where
     debug!("Packages to install: {:?}", to_install);
     Ok(to_install)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn formula(name: &str, deps: &[&str]) -> Formula {
+        use crate::api::Versions;
+        Formula {
+            name: name.to_string(),
+            full_name: name.to_string(),
+            desc: None,
+            homepage: String::new(),
+            versions: Versions {
+                stable: "1".into(),
+                bottle: false,
+            },
+            revision: 0,
+            installed: None,
+            dependencies: if deps.is_empty() {
+                None
+            } else {
+                Some(deps.iter().map(|d| (*d).to_string()).collect())
+            },
+            build_dependencies: None,
+            bottle: None,
+            deprecated: false,
+            disabled: false,
+            deprecation_reason: None,
+            disable_reason: None,
+            keg_only: None,
+            keg_only_reason: None,
+            post_install_defined: false,
+            rb_path: None,
+        }
+    }
+
+    #[test]
+    fn resolve_dependencies_with_satisfied_skips_host_deps() {
+        let formulae = vec![formula("app", &["libfoo"]), formula("libfoo", &[])];
+        let installed = HashSet::new();
+        let out = resolve_dependencies_with_satisfied(
+            &formulae[0],
+            &formulae,
+            &installed,
+            |name| name == "libfoo",
+        )
+        .unwrap();
+        assert_eq!(out, vec!["app"]);
+    }
+
+    #[test]
+    fn resolve_dependencies_with_satisfied_keeps_unsatisfied_deps() {
+        let formulae = vec![formula("app", &["libfoo"]), formula("libfoo", &[])];
+        let installed = HashSet::new();
+        let out =
+            resolve_dependencies_with_satisfied(&formulae[0], &formulae, &installed, |_| false)
+                .unwrap();
+        assert_eq!(out, vec!["libfoo", "app"]);
+    }
+}

@@ -8,7 +8,7 @@ use crate::cask::{
     detect_artifact_type, CaskInstaller, CaskState, InstalledCask, RollbackContext, StagingContext,
 };
 use crate::commands::version_install;
-use crate::deps::{resolve_dependencies, resolve_dependencies_with_satisfied};
+use crate::deps::resolve_dependencies_with_satisfied;
 use crate::discovery::discover_manually_installed_casks;
 use crate::error::{Result, OilError};
 use crate::formula_parser::{BuildSystem, FormulaParser};

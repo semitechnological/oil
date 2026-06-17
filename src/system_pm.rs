@@ -262,6 +262,7 @@ impl SystemPm {
 }
 
 /// Whether `package` is installed by the detected host package manager (apt, rpm, apk, …).
+#[expect(dead_code, reason = "public helper for future CLI/doctor interop checks")]
 pub async fn package_installed_on_host(package: &str) -> bool {
     let Some(pm) = SystemPm::detect().await else {
         return false;
@@ -270,6 +271,7 @@ pub async fn package_installed_on_host(package: &str) -> bool {
 }
 
 /// Whether a dependency name is already satisfied on the host (rpm provides, else package name).
+#[expect(dead_code, reason = "public helper for future CLI/doctor interop checks")]
 pub async fn host_dependency_satisfied(dependency: &str) -> bool {
     let Some(pm) = SystemPm::detect().await else {
         return false;
