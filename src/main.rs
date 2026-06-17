@@ -1,5 +1,5 @@
 mod api;
-mod apt_hooks;
+mod hooks;
 mod bottle;
 mod builder;
 mod cache;
@@ -330,14 +330,14 @@ enum Commands {
         action: SystemAction,
     },
 
-    #[command(about = "apt/dpkg hooks so apt install respects oil Cellar packages (Debian/Ubuntu)")]
-    AptHooks {
+    #[command(about = "Install host package manager hooks (apt, dnf, pacman, apk, …)")]
+    Hooks {
         #[command(subcommand)]
-        action: Option<AptHooksAction>,
+        action: Option<HooksAction>,
     },
 
-    #[command(name = "__apt-preinstall", hide = true)]
-    __AptPreinstall {
+    #[command(name = "__pm-preinstall", hide = true)]
+    __PmPreinstall {
         #[arg(long = "pkg", action = clap::ArgAction::Append)]
         pkg: Vec<String>,
     },
@@ -486,13 +486,22 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
-enum AptHooksAction {
-    #[command(about = "Install /etc/apt/apt.conf.d hook (needs root or sudo)")]
-    Install,
-    #[command(about = "Remove apt hook")]
-    Remove,
-    #[command(about = "Show whether hook is installed")]
-    Status,
+enum HooksAction {
+    #[command(about = "Install hook: oil hooks install apt | oil hooks install (auto-detect)")]
+    Install {
+        #[arg(value_name = "PM", help = "apt, dnf, pacman, apk, …")]
+        pm: Option<String>,
+    },
+    #[command(about = "Remove hook: oil hooks remove apt")]
+    Remove {
+        #[arg(value_name = "PM")]
+        pm: String,
+    },
+    #[command(about = "Status: oil hooks status [pm]")]
+    Status {
+        #[arg(value_name = "PM")]
+        pm: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -918,13 +927,14 @@ async fn main() -> Result<()> {
         Commands::Unpin { packages } => commands::pin::unpin(&packages).await,
         Commands::Lock => commands::lock::lock(&cache).await,
         Commands::__RefreshState => commands::refresh::refresh(&cache).await,
-        Commands::AptHooks { action } => match action {
-            Some(AptHooksAction::Install) => commands::apt_hooks::apt_hooks_install().await,
-            Some(AptHooksAction::Remove) => commands::apt_hooks::apt_hooks_remove().await,
-            Some(AptHooksAction::Status) | None => commands::apt_hooks::apt_hooks_status_cmd().await,
+        Commands::Hooks { action } => match action {
+            Some(HooksAction::Install { pm }) => commands::hooks::hooks_install(pm.as_deref()).await,
+            Some(HooksAction::Remove { pm }) => commands::hooks::hooks_remove(&pm).await,
+            Some(HooksAction::Status { pm }) => commands::hooks::hooks_status(pm.as_deref()).await,
+            None => commands::hooks::hooks_status(None).await,
         },
-        Commands::__AptPreinstall { pkg } => {
-            apt_hooks::apt_preinstall_check_packages(&pkg)?;
+        Commands::__PmPreinstall { pkg } => {
+            hooks::pm_preinstall_check_packages(&pkg)?;
             Ok(())
         }
         Commands::Sync => commands::sync::sync(&cache).await,

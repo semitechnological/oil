@@ -1,4 +1,4 @@
-pub mod apt_hooks;
+pub mod hooks;
 pub mod audit;
 pub mod bundle;
 pub mod path;
