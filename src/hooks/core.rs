@@ -1,5 +1,4 @@
 use crate::error::{OilError, Result};
-use crate::install::InstallState;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -9,34 +8,35 @@ pub fn pm_preinstall_check_packages(package_names: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|e| OilError::InstallError(format!("runtime: {e}")))?;
+    let installed = load_installed_sync()?;
+    let mut blocked = Vec::new();
+    for name in package_names {
+        if cellar_has_package(name, &installed) {
+            blocked.push(name.clone());
+        }
+    }
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    for pkg in &blocked {
+        eprintln!(
+            "oil: refusing host package manager install of '{}' — already in oil Cellar (oil uninstall {})",
+            pkg, pkg
+        );
+    }
+    Err(OilError::InstallError(
+        "host install blocked for oil-managed package(s)".into(),
+    ))
+}
 
-    rt.block_on(async {
-        let state = InstallState::new()?;
-        state.sync_from_cellar().await.ok();
-        let installed = state.load().await?;
-        let mut blocked = Vec::new();
-        for name in package_names {
-            if cellar_has_package(name, &installed) {
-                blocked.push(name.clone());
-            }
-        }
-        if blocked.is_empty() {
-            return Ok(());
-        }
-        for pkg in &blocked {
-            eprintln!(
-                "oil: refusing host package manager install of '{}' — already in oil Cellar (oil uninstall {})",
-                pkg, pkg
-            );
-        }
-        Err(OilError::InstallError(
-            "host install blocked for oil-managed package(s)".into(),
-        ))
-    })
+fn load_installed_sync() -> Result<std::collections::HashMap<String, crate::install::InstalledPackage>> {
+    let path = crate::ui::dirs::oil_dir()?.join("installed.json");
+    if !path.is_file() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let json = fs::read_to_string(&path)
+        .map_err(|e| OilError::InstallError(format!("installed.json: {e}")))?;
+    serde_json::from_str(&json).map_err(|e| OilError::InstallError(format!("installed.json: {e}")))
 }
 
 pub fn cellar_has_package(
