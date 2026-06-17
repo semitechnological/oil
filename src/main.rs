@@ -1,4 +1,5 @@
 mod api;
+mod apt_hooks;
 mod bottle;
 mod builder;
 mod cache;
@@ -329,6 +330,18 @@ enum Commands {
         action: SystemAction,
     },
 
+    #[command(about = "apt/dpkg hooks so apt install respects oil Cellar packages (Debian/Ubuntu)")]
+    AptHooks {
+        #[command(subcommand)]
+        action: Option<AptHooksAction>,
+    },
+
+    #[command(name = "__apt-preinstall", hide = true)]
+    __AptPreinstall {
+        #[arg(long = "pkg", action = clap::ArgAction::Append)]
+        pkg: Vec<String>,
+    },
+
     #[command(about = "List packages with available updates")]
     Outdated,
 
@@ -470,6 +483,16 @@ enum Commands {
 
     #[command(about = "Check installed packages for issues (deprecated, disabled, outdated)")]
     Audit,
+}
+
+#[derive(Subcommand)]
+enum AptHooksAction {
+    #[command(about = "Install /etc/apt/apt.conf.d hook (needs root or sudo)")]
+    Install,
+    #[command(about = "Remove apt hook")]
+    Remove,
+    #[command(about = "Show whether hook is installed")]
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -895,6 +918,15 @@ async fn main() -> Result<()> {
         Commands::Unpin { packages } => commands::pin::unpin(&packages).await,
         Commands::Lock => commands::lock::lock(&cache).await,
         Commands::__RefreshState => commands::refresh::refresh(&cache).await,
+        Commands::AptHooks { action } => match action {
+            Some(AptHooksAction::Install) => commands::apt_hooks::apt_hooks_install().await,
+            Some(AptHooksAction::Remove) => commands::apt_hooks::apt_hooks_remove().await,
+            Some(AptHooksAction::Status) | None => commands::apt_hooks::apt_hooks_status_cmd().await,
+        },
+        Commands::__AptPreinstall { pkg } => {
+            apt_hooks::apt_preinstall_check_packages(&pkg)?;
+            Ok(())
+        }
         Commands::Sync => commands::sync::sync(&cache).await,
         Commands::Tap { action, repair } => commands::tap::tap(action, repair, Some(&cache)).await,
         Commands::Doctor { fix, full } => commands::doctor::doctor(&cache, fix, full).await,
