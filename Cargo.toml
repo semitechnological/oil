@@ -1,9 +1,9 @@
 [package]
 name = "oilpkg"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = ["Oil Contributors"]
-description = "Native package manager for Alpenglow and general use"
+description = "package manager to end all linux package managers"
 license = "MPL-2.0"
 repository = "https://github.com/semitechnological/oil"
 homepage = "https://github.com/semitechnological/oil"
