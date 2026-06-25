@@ -31,6 +31,14 @@ pub enum SystemPm {
     Yum,
     Xbps,
     Nix,
+    Flatpak,
+    Snap,
+    Opkg,
+    Eopkg,
+    Freebsd,
+    Guix,
+    PkgAdd,
+    Swupd,
 }
 
 impl SystemPm {
@@ -47,6 +55,14 @@ impl SystemPm {
             Self::Yum => "yum",
             Self::Xbps => "xbps-install",
             Self::Nix => "nix-env",
+            Self::Flatpak => "flatpak",
+            Self::Snap => "snap",
+            Self::Opkg => "opkg",
+            Self::Eopkg => "eopkg",
+            Self::Freebsd => "pkg",
+            Self::Guix => "guix",
+            Self::PkgAdd => "pkg_add",
+            Self::Swupd => "swupd",
         }
     }
 
@@ -78,15 +94,34 @@ impl SystemPm {
                 ("pacman", Self::Pacman),
                 #[cfg(any(feature = "system-apk", feature = "system-all"))]
                 ("apk", Self::Apk),
+                #[cfg(any(feature = "system-zypper", feature = "system-all"))]
                 ("zypper", Self::Zypper),
+                #[cfg(any(feature = "system-emerge", feature = "system-all"))]
                 ("emerge", Self::Emerge),
                 #[cfg(any(feature = "system-dnf", feature = "system-all"))]
                 ("yum", Self::Yum),
                 #[cfg(any(feature = "system-xbps", feature = "system-all"))]
                 ("xbps-install", Self::Xbps),
+                #[cfg(any(feature = "system-nix", feature = "system-all"))]
                 ("nix-env", Self::Nix),
                 #[cfg(any(feature = "system-nix", feature = "system-all"))]
                 ("nix", Self::Nix),
+                #[cfg(any(feature = "system-flatpak", feature = "system-all"))]
+                ("flatpak", Self::Flatpak),
+                #[cfg(any(feature = "system-snap", feature = "system-all"))]
+                ("snap", Self::Snap),
+                #[cfg(any(feature = "system-opkg", feature = "system-all"))]
+                ("opkg", Self::Opkg),
+                #[cfg(any(feature = "system-eopkg", feature = "system-all"))]
+                ("eopkg", Self::Eopkg),
+                #[cfg(any(feature = "system-freebsd", feature = "system-all"))]
+                ("pkg", Self::Freebsd),
+                #[cfg(any(feature = "system-guix", feature = "system-all"))]
+                ("guix", Self::Guix),
+                #[cfg(any(feature = "system-pkgadd", feature = "system-all"))]
+                ("pkg_add", Self::PkgAdd),
+                #[cfg(any(feature = "system-swupd", feature = "system-all"))]
+                ("swupd", Self::Swupd),
             ];
 
             for (bin, pm) in candidates {
@@ -118,13 +153,29 @@ impl SystemPm {
         if all.contains("alpine") || all.contains("chimera") {
             return Some(Self::Apk);
         }
-        #[cfg(any(feature = "system-xbps", feature = "system-all"))]
+        #[cfg(any(feature = "system-zypper", feature = "system-all"))]
+        if all.contains("suse") || all.contains("opensuse") || all.contains("sles") {
+            return Some(Self::Zypper);
+        }
+        #[cfg(any(feature = "system-emerge", feature = "system-all"))]
+        if all.contains("gentoo") || all.contains("calculate") {
+            return Some(Self::Emerge);
+        }
         #[cfg(any(feature = "system-nix", feature = "system-all"))]
         if all.contains("nixos") {
             return Some(Self::Nix);
         }
+        #[cfg(any(feature = "system-xbps", feature = "system-all"))]
         if all.contains("void") {
             return Some(Self::Xbps);
+        }
+        #[cfg(any(feature = "system-eopkg", feature = "system-all"))]
+        if all.contains("solus") {
+            return Some(Self::Eopkg);
+        }
+        #[cfg(any(feature = "system-opkg", feature = "system-all"))]
+        if all.contains("openwrt") || all.contains("lede") {
+            return Some(Self::Opkg);
         }
         None
     }
@@ -160,6 +211,14 @@ impl SystemPm {
             Self::Emerge => list_installed_with("qlist", &["-ICv"]).await,
             Self::Xbps => list_installed_with("xbps-query", &["-l"]).await,
             Self::Nix => list_installed_with("nix-env", &["-q"]).await,
+            Self::Flatpak => list_installed_with("flatpak", &["list", "--app", "--columns=application,version"]).await,
+            Self::Snap => list_installed_with("snap", &["list"]).await,
+            Self::Opkg => list_installed_with("opkg", &["list-installed"]).await,
+            Self::Eopkg => list_installed_with("eopkg", &["li"]).await,
+            Self::Freebsd => list_installed_with("pkg", &["info"]).await,
+            Self::Guix => list_installed_with("guix", &["package", "-I"]).await,
+            Self::PkgAdd => list_installed_with("pkg_info", &["-m"]).await,
+            Self::Swupd => list_installed_with("swupd", &["bundle-list"]).await,
         }
     }
 
@@ -179,6 +238,14 @@ impl SystemPm {
             Self::Yum => run_capture("yum", &["search", query]).await?,
             Self::Xbps => run_capture("xbps-query", &["-Rs", query]).await?,
             Self::Nix => run_capture("nix-env", &["-qaP", query]).await?,
+            Self::Flatpak => run_capture("flatpak", &["search", query]).await?,
+            Self::Snap => run_capture("snap", &["find", query]).await?,
+            Self::Opkg => run_capture("opkg", &["find", query]).await?,
+            Self::Eopkg => run_capture("eopkg", &["search", query]).await?,
+            Self::Freebsd => run_capture("pkg", &["search", query]).await?,
+            Self::Guix => run_capture("guix", &["package", "-s", query]).await?,
+            Self::PkgAdd => run_capture("pkg_info", &["-Q", query]).await?,
+            Self::Swupd => run_capture("swupd", &["search", query]).await?,
         };
 
         Ok(parse_search_results(self, &output, limit))
@@ -240,6 +307,34 @@ impl SystemPm {
                 cmd
             }
             Self::Emerge => return false,
+            Self::Flatpak => {
+                let mut cmd = StdCommand::new("flatpak");
+                cmd.args(["info", package]);
+                cmd
+            }
+            Self::Snap => {
+                let mut cmd = StdCommand::new("snap");
+                cmd.args(["info", package]);
+                cmd
+            }
+            Self::Opkg => {
+                let mut cmd = StdCommand::new("opkg");
+                cmd.args(["status", package]);
+                cmd
+            }
+            Self::Eopkg => {
+                let mut cmd = StdCommand::new("eopkg");
+                cmd.args(["info", package]);
+                cmd
+            }
+            Self::Freebsd => {
+                let mut cmd = StdCommand::new("pkg");
+                cmd.args(["info", package]);
+                cmd
+            }
+            Self::Guix => return false,
+            Self::PkgAdd => return false,
+            Self::Swupd => return false,
         };
 
         cmd.output()
@@ -371,6 +466,14 @@ fn parse_search_results(pm: &SystemPm, output: &str, limit: usize) -> Vec<System
             SystemPm::Xbps => parse_xbps_search_line(line),
             SystemPm::Nix => parse_nix_search_line(line),
             SystemPm::Brew => parse_plain_name(line),
+            SystemPm::Flatpak => parse_flatpak_search_line(line),
+            SystemPm::Snap => parse_snap_search_line(line),
+            SystemPm::Opkg => parse_plain_name(line),
+            SystemPm::Eopkg => parse_dash_summary(line),
+            SystemPm::Freebsd => parse_dash_summary(line),
+            SystemPm::Guix => parse_dash_summary(line),
+            SystemPm::PkgAdd => parse_plain_name(line),
+            SystemPm::Swupd => parse_plain_name(line),
         };
 
         if let Some(result) = parsed {
@@ -514,6 +617,34 @@ fn parse_nix_search_line(line: &str) -> Option<SystemSearchResult> {
         version,
         summary: None,
     })
+}
+
+fn parse_flatpak_search_line(line: &str) -> Option<SystemSearchResult> {
+    // flatpak search: "Name\tDescription\tApplication ID\tVersion\tBranch"
+    let mut cols = line.split('\t');
+    let name = cols.next()?;
+    let desc = cols.next().and_then(non_empty);
+    Some(SystemSearchResult {
+        name: name.to_string(),
+        version: cols.nth(1).and_then(non_empty),
+        summary: desc,
+    })
+}
+
+fn parse_snap_search_line(line: &str) -> Option<SystemSearchResult> {
+    // snap find: "Name  Version  Publisher  Notes  Summary"
+    if line.starts_with("Name") || line.starts_with("-") { return None; }
+    let mut cols = line.splitn(5, ' ').filter(|s| !s.is_empty());
+    let name = cols.next()?;
+    let version = cols.next().and_then(non_empty);
+    // skip publisher and notes
+    let rest: Vec<&str> = cols.collect();
+    if rest.len() >= 2 {
+        let summary = rest.into_iter().skip(1).collect::<Vec<_>>().join(" ");
+        Some(SystemSearchResult { name: name.to_string(), version, summary: non_empty(&summary) })
+    } else {
+        Some(SystemSearchResult { name: name.to_string(), version, summary: None })
+    }
 }
 
 fn split_name_version(name_version: &str) -> (String, Option<String>) {
