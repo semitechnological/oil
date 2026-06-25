@@ -1,6 +1,6 @@
 #[cfg(any(feature = "system-apk", feature = "system-all"))]
 pub mod apk;
-#[cfg(any(feature = "system-apt", feature = "system-all"))]
+#[cfg(any(feature = "system-apt", feature = "system-opkg", feature = "system-all"))]
 pub mod deb;
 #[cfg(any(feature = "system-pacman", feature = "system-all"))]
 pub mod pacman;
@@ -20,8 +20,8 @@ pub fn extract_package_tracked(
     dest_dir: &Path,
 ) -> Result<(Vec<PathBuf>, Vec<PathBuf>)> {
     let name = path.to_string_lossy();
-    #[cfg(any(feature = "system-apt", feature = "system-all"))]
-    if name.ends_with(".deb") {
+    #[cfg(any(feature = "system-apt", feature = "system-opkg", feature = "system-all"))]
+    if name.ends_with(".deb") || name.ends_with(".ipk") {
         return deb::extract_tracked(path, dest_dir);
     }
     #[cfg(any(feature = "system-pacman", feature = "system-all"))]

@@ -2,8 +2,7 @@
 pub mod apk;
 #[cfg(any(feature = "system-apt", feature = "system-all"))]
 pub mod apt;
-#[cfg(any(feature = "system-dnf", feature = "system-all"))]
-#[cfg(any(feature = "system-dnf", feature = "system-all"))]
+#[cfg(any(feature = "system-dnf", feature = "system-zypper", feature = "system-all"))]
 pub mod dnf;
 #[cfg(any(feature = "system-pacman", feature = "system-all"))]
 pub mod pacman;
@@ -11,6 +10,14 @@ pub mod pacman;
 pub mod xbps;
 #[cfg(any(feature = "system-nix", feature = "system-all"))]
 pub mod nix;
+#[cfg(any(feature = "system-opkg", feature = "system-all"))]
+pub mod opkg;
+#[cfg(any(feature = "system-eopkg", feature = "system-all"))]
+pub mod eopkg;
+#[cfg(any(feature = "system-flatpak", feature = "system-all"))]
+pub mod flatpak;
+#[cfg(any(feature = "system-snap", feature = "system-all"))]
+pub mod snap;
 
 use serde::{Deserialize, Serialize};
 
