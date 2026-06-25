@@ -439,8 +439,8 @@ impl SystemManager {
                 let reg = crate::system::registry::apt::AptRegistry::default_for_host();
                 reg.load(&client).await
             }
-            #[cfg(any(feature = "system-dnf", feature = "system-all"))]
-            SystemPm::Dnf | SystemPm::Yum => {
+            #[cfg(any(feature = "system-dnf", feature = "system-zypper", feature = "system-all"))]
+            SystemPm::Dnf | SystemPm::Yum | SystemPm::Zypper => {
                 let reg = crate::system::registry::dnf::DnfRegistry::default_for_host()?;
                 reg.load(&client).await
             }
@@ -464,8 +464,28 @@ impl SystemManager {
                 let reg = crate::system::registry::nix::NixRegistry::default();
                 reg.load(&client).await
             }
+            #[cfg(any(feature = "system-opkg", feature = "system-all"))]
+            SystemPm::Opkg => {
+                let reg = crate::system::registry::opkg::OpkgRegistry::openwrt_default();
+                reg.load(&client).await
+            }
+            #[cfg(any(feature = "system-eopkg", feature = "system-all"))]
+            SystemPm::Eopkg => {
+                let reg = crate::system::registry::eopkg::EopkgRegistry::solus_default();
+                reg.load(&client).await
+            }
+            #[cfg(any(feature = "system-flatpak", feature = "system-all"))]
+            SystemPm::Flatpak => {
+                let reg = crate::system::registry::flatpak::FlatpakRegistry;
+                reg.load(&client).await
+            }
+            #[cfg(any(feature = "system-snap", feature = "system-all"))]
+            SystemPm::Snap => {
+                let reg = crate::system::registry::snap::SnapRegistry;
+                reg.load(&client).await
+            }
             _ => Err(OilError::PlatformNotSupported(
-                "oil system registry install is not supported for this package manager".into(),
+                format!("oil system registry install is not supported for {}; use {}'s native install command", self.pm.name(), self.pm.name()),
             )),
         }
     }

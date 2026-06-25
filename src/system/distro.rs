@@ -88,9 +88,11 @@ fn detect_format(id: &str, id_like: &str) -> PackageFormat {
     ];
     let rpm_ids = [
         "fedora", "rhel", "centos", "rocky", "alma", "opensuse", "suse", "oracle",
+        "sles", "opensuse-leap", "opensuse-tumbleweed",
     ];
     let pacman_ids = ["arch", "manjaro", "endeavouros", "garuda", "artix"];
-    let apk_ids = ["alpine"];
+    let apk_ids = ["alpine", "chimera"];
+    let opkg_ids = ["openwrt", "lede"];
 
     if matches_distro(&id, &like, &deb_ids) {
         PackageFormat::Deb
@@ -100,6 +102,8 @@ fn detect_format(id: &str, id_like: &str) -> PackageFormat {
         PackageFormat::Pacman
     } else if matches_distro(&id, &like, &apk_ids) {
         PackageFormat::Apk
+    } else if matches_distro(&id, &like, &opkg_ids) {
+        PackageFormat::Deb
     } else {
         PackageFormat::Other
     }

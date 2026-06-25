@@ -28,14 +28,33 @@ impl DnfRegistry {
         ))
     }
 
+    pub fn opensuse_tumbleweed_default() -> Self {
+        Self::new("https://download.opensuse.org/tumbleweed/repo/oss/")
+    }
+
+    pub fn opensuse_leap_default() -> Self {
+        let version = suse_version_id().unwrap_or_else(|| "15.6".to_string());
+        Self::new(&format!(
+            "https://download.opensuse.org/distribution/leap/{version}/repo/oss/"
+        ))
+    }
+
     pub fn default_for_host() -> Result<Self> {
         let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-        if rpm_family_from_os_release(&os_release).as_deref() == Some("fedora") {
-            return Ok(Self::fedora_default());
+        match rpm_family_from_os_release(&os_release).as_deref() {
+            Some("fedora") => Ok(Self::fedora_default()),
+            Some("opensuse") | Some("suse") | Some("sles") => {
+                // ponytail: tumbleweed check via VARIANT_ID; leap fallback
+                if os_release.contains("tumbleweed") {
+                    Ok(Self::opensuse_tumbleweed_default())
+                } else {
+                    Ok(Self::opensuse_leap_default())
+                }
+            }
+            _ => Err(OilError::PlatformNotSupported(
+                "oil system registry install currently supports Fedora- and openSUSE-compatible RPM repositories; other RPM distros need repo-file parsing".into(),
+            )),
         }
-        Err(OilError::PlatformNotSupported(
-            "oil system registry install currently supports Fedora-compatible RPM repositories; this RPM distro needs repo-file parsing first".into(),
-        ))
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
@@ -165,6 +184,19 @@ fn fedora_version_id() -> Option<String> {
     os_release.lines().find_map(|line| {
         let value = line.strip_prefix("VERSION_ID=")?;
         Some(value.trim_matches('"').to_string())
+    })
+}
+
+fn suse_version_id() -> Option<String> {
+    let os_release = std::fs::read_to_string("/etc/os-release").ok()?;
+    os_release.lines().find_map(|line| {
+        let value = line.strip_prefix("VERSION_ID=")?;
+        // Skip date-formatted version IDs (tumbleweed: "20250624")
+        let v = value.trim_matches('"');
+        if v.len() == 8 && v.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+        Some(v.to_string())
     })
 }
 
