@@ -53,15 +53,25 @@ curl -fsSL https://raw.githubusercontent.com/semitechnological/oil/master/instal
 
 Oil resolves packages through existing distribution ecosystems (feature-gated):
 
-| Feature | Registry | Extractor |
-|---------|----------|-----------|
-| `system-apt` | Debian/Ubuntu repos | `.deb` |
-| `system-dnf` | Fedora/RHEL repos | `.rpm` |
-| `system-pacman` | Arch repos | `.pkg.tar.zst` |
-| `system-apk` | Alpine/Chimera repos | `.apk` |
-| `system-xbps` | Void repos | `.xbps` |
-| `system-nix` | Nixpkgs | Nix store |
-| `system-brew` | Linuxbrew | Bottles |
+| Feature | Registry | Extractor | Systems |
+|---------|----------|-----------|---------|
+| `system-apt` | Debian/Ubuntu repos | `.deb` | Debian, Ubuntu, Mint, Pop, Kali, Parrot |
+| `system-dnf` | Fedora/RHEL repos | `.rpm` | Fedora, RHEL, CentOS, Rocky, Alma |
+| `system-zypper` | openSUSE repos (via RPM metadata) | `.rpm` | openSUSE (Tumbleweed/Leap), SLES |
+| `system-pacman` | Arch repos | `.pkg.tar.zst` | Arch, Manjaro, EndeavourOS, Garuda, Artix |
+| `system-apk` | Alpine/Chimera repos | `.apk` | Alpine, Chimera Linux |
+| `system-xbps` | Void repos | `.xbps` | Void Linux |
+| `system-nix` | Nixpkgs | Nix store | NixOS |
+| `system-opkg` | OpenWrt Packages.gz | `.ipk` (via deb extractor) | OpenWrt, LEDE |
+| `system-eopkg` | Solus eopkg-index.xml | `.eopkg` | Solus |
+| `system-brew` | Linuxbrew | Bottles | macOS, Linux |
+| `system-flatpak` | — (detect/search/list only) | daemon-based | Cross-distro |
+| `system-snap` | — (detect/search/list only) | daemon-based | Cross-distro |
+| `system-emerge` | — (detect/list only) | source-based | Gentoo |
+| `system-freebsd` | — (detect/list only) | CLI passthrough | FreeBSD |
+| `system-guix` | — (detect/list only) | CLI passthrough | Guix System |
+| `system-pkgadd` | — (detect/list only) | CLI passthrough | OpenBSD |
+| `system-swupd` | — (detect/list only) | CLI passthrough | Clear Linux |
 
 Default builds include all registries (`system-all`).
-Compile with `--no-default-features` to select only what you need.
+Compile with `--no-default-features --features "system-xbps,system-apk"` to select only what you need.

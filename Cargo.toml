@@ -1,6 +1,6 @@
 [package]
 name = "oilpkg"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["Oil Contributors"]
 description = "package manager to end all linux package managers"
@@ -23,7 +23,7 @@ exclude = [
 [features]
 # OS-gated system registries — disable what you don't need to cut binary size
 default = ["system-all"]
-system-all = ["system-apt", "system-dnf", "system-pacman", "system-apk", "system-xbps", "system-brew", "system-nix"]
+system-all = ["system-apt", "system-dnf", "system-pacman", "system-apk", "system-xbps", "system-brew", "system-nix", "system-zypper", "system-emerge", "system-flatpak", "system-snap", "system-opkg", "system-eopkg", "system-freebsd", "system-guix", "system-pkgadd", "system-swupd"]
 # system-brew: Linuxbrew (Homebrew on Linux)
 system-apt = []
 system-dnf = []
@@ -32,6 +32,16 @@ system-apk = []
 system-xbps = []
 system-brew = []
 system-nix = []
+system-zypper = []
+system-emerge = []
+system-flatpak = []
+system-snap = []
+system-opkg = []
+system-eopkg = []
+system-freebsd = []
+system-guix = []
+system-pkgadd = []
+system-swupd = []
 platform-linux = []
 platform-macos = []
 platform-windows = []
