@@ -163,25 +163,25 @@ jobs:
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-fedora
-            container: fedora:latest
+            container: ubuntu:24.04
 
           - distro: fedora
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-fedora
-            container: fedora:latest
+            container: ubuntu:24.04
 
           - distro: arch
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-arch
-            container: archlinux:latest
+            container: ubuntu:24.04
 
           - distro: arch
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-arch
-            container: archlinux:latest
+            container: ubuntu:24.04
 
           - distro: alpine
             arch: x64
@@ -199,7 +199,7 @@ jobs:
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-opensuse
-            container: opensuse/tumbleweed:latest
+            container: ubuntu:24.04
 
           - distro: opensuse
             arch: arm64
@@ -211,7 +211,7 @@ jobs:
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-void
-            container: voidlinux/voidlinux:latest
+            container: ubuntu:24.04
 
           - distro: void
             arch: arm64
@@ -223,7 +223,7 @@ jobs:
             arch: x64
             target: x86_64-unknown-linux-musl
             asset_name: oil-linux-x64-nix
-            container: ubuntu:24.04
+            container: alpine:latest
 
           - distro: nixos
             arch: arm64
@@ -292,6 +292,7 @@ jobs:
             container: ubuntu:24.04
 
 
+
     env:
       HOME: /root
     steps:
@@ -354,8 +355,16 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        if: !(matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel'))
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install Rust (Nightly for Tier 3 OpenWrt targets)
+        uses: dtolnay/rust-toolchain@nightly
+        if: matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel')
+        with:
+          targets: ${{ matrix.target }}
+          components: rust-src
 
       - name: Create FreeBSD cargo config
         if: matrix.distro == 'freebsd'
@@ -397,7 +406,12 @@ jobs:
 
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          if [ "${{ matrix.distro }}" = "openwrt" ] && { [ "${{ matrix.arch }}" = "mips" ] || [ "${{ matrix.arch }}" = "mipsel" ]; }; then
+            cargo build --release --target ${{ matrix.target }} -Z build-std
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
 
       - name: Prepare binary
         run: |
@@ -471,7 +485,8 @@ jobs:
           operating_system: openbsd
           version: '7.5'
           run: |
-            sudo pkg_add -I rust
+            sudo pkg_add -I rust gmake
+            export PATH="/usr/local/bin:$PATH"
             cargo build --release
       - name: Prepare binary
         run: |
