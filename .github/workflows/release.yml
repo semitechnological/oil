@@ -40,81 +40,75 @@ jobs:
       - name: cargo clippy
         run: cargo clippy -- -D warnings
         continue-on-error: true
-  check-version:
-    name: Check for version bump
+  auto-tag:
+    name: Auto-tag on version bump
     runs-on: ubuntu-latest
-    outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
-      version: ${{ steps.check.outputs.version }}
-      prev_tag: ${{ steps.check.outputs.prev_tag }}
+    needs: check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Check if version changed
-        id: check
+      - name: Check for version bump and push tag
         run: |
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            echo "Tag push for v$VERSION"
-            PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | grep -v "^v${VERSION}$" | head -1 || echo "")
-            echo "Previous tag: $PREV_TAG"
-            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            VERSION="${{ github.event.inputs.version }}"
-            echo "Workflow dispatch for v$VERSION"
-            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-            echo "Previous tag: $PREV_TAG"
-            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "version=$VERSION" >> $GITHUB_OUTPUT
-          else
-            CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-            echo "Current version: $CURRENT_VERSION"
+          CURRENT_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "Current version: $CURRENT_VERSION"
 
-            git show HEAD^:Cargo.toml > /tmp/old_cargo.toml 2>/dev/null || echo 'version = "0.0.0"' > /tmp/old_cargo.toml
-            PREV_VERSION=$(grep '^version' /tmp/old_cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-            echo "Previous version: $PREV_VERSION"
+          git show HEAD^:Cargo.toml > /tmp/old_cargo.toml 2>/dev/null || echo 'version = "0.0.0"' > /tmp/old_cargo.toml
+          PREV_VERSION=$(grep '^version' /tmp/old_cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "Previous version: $PREV_VERSION"
 
-            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-            echo "Previous tag: $PREV_TAG"
-            echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
-
-            if git ls-remote --tags origin | grep -q "refs/tags/v$CURRENT_VERSION"; then
-              echo "Tag v$CURRENT_VERSION already exists, skipping release"
-              echo "should_release=false" >> $GITHUB_OUTPUT
-            elif [ "$CURRENT_VERSION" != "$PREV_VERSION" ]; then
-              echo "Version changed from $PREV_VERSION to $CURRENT_VERSION"
-              echo "should_release=true" >> $GITHUB_OUTPUT
-              echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          TAG="v$CURRENT_VERSION"
+          if [ "$CURRENT_VERSION" != "$PREV_VERSION" ]; then
+            if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
+              echo "Tag $TAG already exists, skipping tag creation"
             else
-              echo "Version unchanged, skipping release"
-              echo "should_release=false" >> $GITHUB_OUTPUT
+              echo "Version changed from $PREV_VERSION to $CURRENT_VERSION. Tagging..."
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git tag -a "$TAG" -m "Release $TAG"
+              git push origin "$TAG"
             fi
+          else
+            echo "Version unchanged."
           fi
 
   generate-notes:
     name: Generate release notes
     runs-on: ubuntu-latest
-    needs: check-version
-    if: needs.check-version.outputs.should_release == 'true'
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     outputs:
       release_notes: ${{ steps.generate.outputs.notes }}
+      version: ${{ steps.get-version.outputs.version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Get version
+        id: get-version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          else
+            VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate release notes from git history
         id: generate
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          PREV_TAG="${{ needs.check-version.outputs.prev_tag }}"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | grep -v "^${VERSION}$" | head -1 || echo "")
+          else
+            VERSION="v$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
+            PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          fi
+          echo "Current: $VERSION, Previous tag: $PREV_TAG"
 
           if [ -n "$PREV_TAG" ]; then
             RANGE="${PREV_TAG}..HEAD"
@@ -128,9 +122,9 @@ jobs:
           if [ -z "$NOTES" ]; then
             if [ -n "$PREV_TAG" ]; then
               NOTES="## What's Changed
-          See the [full changelog](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...v${VERSION}) for details."
+          See the [full changelog](https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${VERSION}) for details."
             else
-              NOTES="## Release v${VERSION}
+              NOTES="## Release ${VERSION}
           Initial release."
             fi
           fi
@@ -141,35 +135,14 @@ jobs:
           cat /tmp/release_notes.md >> $GITHUB_OUTPUT
           echo "NOTES_EOF" >> $GITHUB_OUTPUT
 
-  create-tag:
-    name: Create release tag
-    runs-on: ubuntu-latest
-    needs: [check-version, generate-notes]
-    if: needs.check-version.outputs.should_release == 'true' && github.ref_type != 'tag'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create and push tag
-        run: |
-          TAG="v${{ needs.check-version.outputs.version }}"
-          if git ls-remote --tags origin | grep -q "refs/tags/$TAG"; then
-            echo "Tag $TAG already exists, skipping"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-          fi
-
 
 
   build:
     name: Build ${{ matrix.distro }} (${{ matrix.arch }})
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
-    needs: [check-version]
-    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -450,8 +423,8 @@ jobs:
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     runs-on: macos-latest
-    needs: [check-version]
-    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -488,8 +461,8 @@ jobs:
   build-openbsd:
     name: Build OpenBSD (x64)
     runs-on: ubuntu-latest
-    needs: [check-version]
-    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - name: Build on OpenBSD
@@ -516,8 +489,8 @@ jobs:
   create-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [check-version, generate-notes, create-tag, build, build-macos, build-openbsd]
-    if: always() && needs.check-version.outputs.should_release == 'true' && (needs.build.result == 'success') && (needs.build-macos.result == 'success') && (needs.build-openbsd.result == 'success')
+    needs: [check, generate-notes, build, build-macos, build-openbsd]
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -529,8 +502,8 @@ jobs:
       - name: Create release and upload assets
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: v${{ needs.check-version.outputs.version }}
+          tag_name: v${{ needs.generate-notes.outputs.version }}
+          name: v${{ needs.generate-notes.outputs.version }}
           body: ${{ needs.generate-notes.outputs.release_notes }}
           draft: false
           prerelease: false
