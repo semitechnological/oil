@@ -140,7 +140,6 @@ jobs:
   build:
     name: Build ${{ matrix.distro }} (${{ matrix.arch }})
     runs-on: ubuntu-latest
-    container: ${{ matrix.container }}
     needs: check
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     strategy:
@@ -151,206 +150,143 @@ jobs:
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64
-            container: ubuntu:24.04
 
           - distro: ubuntu
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64
-            container: ubuntu:24.04
 
           - distro: fedora
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-fedora
-            container: ubuntu:24.04
 
           - distro: fedora
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-fedora
-            container: ubuntu:24.04
 
           - distro: arch
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-arch
-            container: ubuntu:24.04
 
           - distro: arch
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-arch
-            container: ubuntu:24.04
 
           - distro: alpine
             arch: x64
             target: x86_64-unknown-linux-musl
             asset_name: oil-linux-x64-musl
-            container: alpine:latest
 
           - distro: alpine
             arch: arm64
             target: aarch64-unknown-linux-musl
             asset_name: oil-linux-arm64-musl
-            container: ubuntu:24.04
 
           - distro: opensuse
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-opensuse
-            container: ubuntu:24.04
 
           - distro: opensuse
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-opensuse
-            container: ubuntu:24.04
 
           - distro: void
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-void
-            container: ubuntu:24.04
 
           - distro: void
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-void
-            container: ubuntu:24.04
 
           - distro: nixos
             arch: x64
             target: x86_64-unknown-linux-musl
             asset_name: oil-linux-x64-nix
-            container: alpine:latest
 
           - distro: nixos
             arch: arm64
             target: aarch64-unknown-linux-musl
             asset_name: oil-linux-arm64-nix
-            container: ubuntu:24.04
 
           - distro: freebsd
             arch: x64
             target: x86_64-unknown-freebsd
             asset_name: oil-freebsd-x64
-            container: ''
 
           - distro: freebsd
             arch: arm64
             target: aarch64-unknown-freebsd
             asset_name: oil-freebsd-arm64
-            container: ''
 
           - distro: gentoo
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-gentoo
-            container: ubuntu:24.04
 
           - distro: gentoo
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-gentoo
-            container: ubuntu:24.04
 
           - distro: solus
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-solus
-            container: ubuntu:24.04
 
           - distro: solus
             arch: arm64
             target: aarch64-unknown-linux-gnu
             asset_name: oil-linux-arm64-solus
-            container: ubuntu:24.04
 
           - distro: openwrt
             arch: armv7
             target: armv7-unknown-linux-musleabihf
             asset_name: oil-linux-armv7-musl
-            container: ubuntu:24.04
 
           - distro: openwrt
             arch: mips
             target: mips-unknown-linux-musl
             asset_name: oil-linux-mips-musl
-            container: ubuntu:24.04
 
           - distro: openwrt
             arch: mipsel
             target: mipsel-unknown-linux-musl
             asset_name: oil-linux-mipsel-musl
-            container: ubuntu:24.04
 
           - distro: swupd
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-swupd
-            container: ubuntu:24.04
 
 
-
-    env:
-      HOME: /root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system deps (Debian/Ubuntu)
-        if: matrix.container != '' && contains(matrix.container, 'ubuntu')
+      - name: Install system deps
         run: |
-          apt-get update
-          apt-get install -y curl gcc g++ pkg-config libssl-dev
-
-      - name: Install system deps (Fedora)
-        if: matrix.container != '' && contains(matrix.container, 'fedora')
-        run: |
-          dnf install -y curl gcc gcc-c++ pkg-config openssl-devel
-
-      - name: Install system deps (Arch)
-        if: matrix.container != '' && contains(matrix.container, 'arch')
-        run: |
-          pacman -Syu --noconfirm curl gcc pkg-config openssl
-
-      - name: Install system deps (Alpine)
-        if: matrix.container != '' && contains(matrix.container, 'alpine')
-        run: |
-          apk add bash curl gcc g++ pkgconfig openssl-dev musl-dev
-
-      - name: Install system deps (openSUSE)
-        if: matrix.container != '' && contains(matrix.container, 'opensuse')
-        run: |
-          zypper --non-interactive install curl gcc gcc-c++ pkg-config openssl-devel
-
-      - name: Install system deps (Void)
-        if: matrix.container != '' && contains(matrix.container, 'voidlinux')
-        run: |
-          xbps-install -Sy curl gcc pkg-config openssl-devel make
+          sudo apt-get update
+          sudo apt-get install -y curl gcc g++ pkg-config libssl-dev musl-tools
 
       - name: Install cross-compilation tools (openwrt / ARM64)
         if: ${{ (matrix.arch == 'arm64' || matrix.distro == 'openwrt') && matrix.distro != 'freebsd' && matrix.distro != 'openbsd' }}
         run: |
-          if command -v apt-get &>/dev/null; then
-            apt-get update
-            if [ "${{ matrix.arch }}" = "arm64" ]; then
-              apt-get install -y gcc-aarch64-linux-gnu
-            elif [ "${{ matrix.arch }}" = "armv7" ]; then
-              apt-get install -y gcc-arm-linux-gnueabihf
-            elif [ "${{ matrix.arch }}" = "mips" ]; then
-              apt-get install -y gcc-mips-linux-gnu
-            elif [ "${{ matrix.arch }}" = "mipsel" ]; then
-              apt-get install -y gcc-mipsel-linux-gnu
-            fi
-          elif command -v dnf &>/dev/null; then
-            if [ "${{ matrix.arch }}" = "arm64" ]; then
-              dnf install -y gcc-aarch64-linux-gnu
-            fi
-          elif command -v pacman &>/dev/null; then
-            if [ "${{ matrix.arch }}" = "arm64" ]; then
-              pacman -S --noconfirm aarch64-linux-gnu-gcc
-            fi
+          sudo apt-get update
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          elif [ "${{ matrix.arch }}" = "armv7" ]; then
+            sudo apt-get install -y gcc-arm-linux-gnueabihf
+          elif [ "${{ matrix.arch }}" = "mips" ]; then
+            sudo apt-get install -y gcc-mips-linux-gnu
+          elif [ "${{ matrix.arch }}" = "mipsel" ]; then
+            sudo apt-get install -y gcc-mipsel-linux-gnu
           fi
 
       - name: Install Rust
@@ -397,13 +333,20 @@ jobs:
           fi
 
       - name: Create ARM64 cargo config
-        if: matrix.arch == 'arm64' && matrix.distro != 'freebsd' && matrix.distro != 'openwrt'
+        if: ${{ matrix.arch == 'arm64' && matrix.distro != 'freebsd' && matrix.distro != 'openwrt' }}
         run: |
           mkdir -p ~/.cargo
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
           echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
+      - name: Create musl cargo config
+        if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+        run: |
+          echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> $GITHUB_ENV
 
 
       - name: Build release binary
