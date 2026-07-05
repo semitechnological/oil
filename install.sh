@@ -153,6 +153,29 @@ install_from_release() {
 
   ASSET="oil-${os}-${arch}"
 
+  if [ "$os" = "linux" ]; then
+    local distro_id=""
+    local distro_like=""
+    if [ -f /etc/os-release ]; then
+      distro_id="$(grep -E '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+      distro_like="$(grep -E '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+    fi
+    local all_ids=" ${distro_id} ${distro_like} "
+
+    if [[ "$all_ids" =~ "fedora" || "$all_ids" =~ "rhel" || "$all_ids" =~ "centos" || "$all_ids" =~ "rocky" || "$all_ids" =~ "alma" ]]; then
+      ASSET="${ASSET}-fedora"
+    elif [[ "$all_ids" =~ "arch" || "$all_ids" =~ "manjaro" || "$all_ids" =~ "garuda" || "$all_ids" =~ "endeavouros" || "$all_ids" =~ "artix" ]]; then
+      ASSET="${ASSET}-arch"
+    elif [[ "$all_ids" =~ "alpine" || "$all_ids" =~ "chimera" ]]; then
+      ASSET="${ASSET}-musl"
+    else
+      # Fallback check for musl libc
+      if command -v ldd &>/dev/null && ldd /bin/ls 2>&1 | grep -q 'musl'; then
+        ASSET="${ASSET}-musl"
+      fi
+    fi
+  fi
+
   if [ -z "$VERSION" ]; then
     info "Fetching latest release version…"
     VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \

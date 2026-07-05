@@ -207,10 +207,22 @@ jobs:
             asset_name: oil-linux-x64-fedora
             container: fedora:latest
 
+          - distro: fedora
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            asset_name: oil-linux-arm64-fedora
+            container: fedora:latest
+
           - distro: arch
             arch: x64
             target: x86_64-unknown-linux-gnu
             asset_name: oil-linux-x64-arch
+            container: archlinux:latest
+
+          - distro: arch
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            asset_name: oil-linux-arm64-arch
             container: archlinux:latest
 
           - distro: alpine
@@ -219,12 +231,18 @@ jobs:
             asset_name: oil-linux-x64-musl
             container: alpine:latest
 
+          - distro: alpine
+            arch: arm64
+            target: aarch64-unknown-linux-musl
+            asset_name: oil-linux-arm64-musl
+            container: ubuntu:24.04
+
     env:
       HOME: /root
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system deps (Debian)
+      - name: Install system deps (Debian/Ubuntu)
         if: contains(matrix.container, 'ubuntu')
         run: |
           apt-get update
@@ -248,7 +266,13 @@ jobs:
       - name: Install cross-compilation tools (ARM64)
         if: matrix.arch == 'arm64'
         run: |
-          apt-get install -y gcc-aarch64-linux-gnu
+          if command -v apt-get &>/dev/null; then
+            apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+          elif command -v dnf &>/dev/null; then
+            dnf install -y gcc-aarch64-linux-gnu
+          elif command -v pacman &>/dev/null; then
+            pacman -S --noconfirm aarch64-linux-gnu-gcc
+          fi
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -260,6 +284,8 @@ jobs:
         run: |
           mkdir -p ~/.cargo
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+          echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Build release binary
@@ -274,6 +300,46 @@ jobs:
         run: |
           sha256sum ${{ matrix.asset_name }} | awk '{print $1}' > ${{ matrix.asset_name }}.sha256
 
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
+          files: |
+            ${{ matrix.asset_name }}
+            ${{ matrix.asset_name }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: macos-latest
+    needs: [check-version, create-release]
+    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            target: aarch64-apple-darwin
+            asset_name: oil-macos-arm64
+          - arch: x64
+            target: x86_64-apple-darwin
+            asset_name: oil-macos-x64
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Prepare binary
+        run: |
+          cp target/${{ matrix.target }}/release/oil ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+      - name: Checksum
+        run: |
+          shasum -a 256 ${{ matrix.asset_name }} | awk '{print $1}' > ${{ matrix.asset_name }}.sha256
       - name: Upload binary to release
         uses: softprops/action-gh-release@v2
         with:
