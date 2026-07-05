@@ -360,9 +360,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Rust (Nightly for Tier 3 OpenWrt targets)
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@stable
         if: matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel')
         with:
+          toolchain: nightly
           targets: ${{ matrix.target }}
           components: rust-src
 
