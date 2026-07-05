@@ -29,13 +29,103 @@ path_hint() {
   esac
 }
 
+detect_features() {
+  local os
+  os="$(uname -s)"
+  if [ "$os" = "Darwin" ]; then
+    echo "system-brew"
+    return
+  fi
+
+  # Default cross-distro features
+  local features="system-flatpak,system-snap,system-brew"
+
+  # Distro detection via /etc/os-release
+  local distro_id=""
+  local distro_like=""
+  if [ -f /etc/os-release ]; then
+    distro_id="$(grep -E '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+    distro_like="$(grep -E '^ID_LIKE=' /etc/os-release | cut -d= -f2 | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+  fi
+
+  local all_ids=" ${distro_id} ${distro_like} "
+  local pm_detected=""
+
+  if [[ "$all_ids" =~ "debian" || "$all_ids" =~ "ubuntu" || "$all_ids" =~ "mint" || "$all_ids" =~ "pop" || "$all_ids" =~ "kali" || "$all_ids" =~ "parrot" ]]; then
+    features="${features},system-apt"
+    pm_detected="apt"
+  elif [[ "$all_ids" =~ "fedora" || "$all_ids" =~ "rhel" || "$all_ids" =~ "centos" || "$all_ids" =~ "rocky" || "$all_ids" =~ "alma" ]]; then
+    features="${features},system-dnf"
+    pm_detected="dnf"
+  elif [[ "$all_ids" =~ "arch" || "$all_ids" =~ "manjaro" || "$all_ids" =~ "garuda" || "$all_ids" =~ "endeavouros" || "$all_ids" =~ "artix" ]]; then
+    features="${features},system-pacman"
+    pm_detected="pacman"
+  elif [[ "$all_ids" =~ "alpine" || "$all_ids" =~ "chimera" ]]; then
+    features="${features},system-apk"
+    pm_detected="apk"
+  elif [[ "$all_ids" =~ "suse" || "$all_ids" =~ "opensuse" || "$all_ids" =~ "sles" ]]; then
+    features="${features},system-zypper,system-dnf"
+    pm_detected="zypper"
+  elif [[ "$all_ids" =~ "void" ]]; then
+    features="${features},system-xbps"
+    pm_detected="xbps"
+  elif [[ "$all_ids" =~ "solus" ]]; then
+    features="${features},system-eopkg"
+    pm_detected="eopkg"
+  elif [[ "$all_ids" =~ "openwrt" || "$all_ids" =~ "lede" ]]; then
+    features="${features},system-opkg"
+    pm_detected="opkg"
+  elif [[ "$all_ids" =~ "nixos" ]]; then
+    features="${features},system-nix"
+    pm_detected="nix"
+  fi
+
+  # Fallback to checking command presence on PATH
+  if [ -z "$pm_detected" ]; then
+    if command -v apt-get &>/dev/null; then
+      features="${features},system-apt"
+    elif command -v dnf &>/dev/null || command -v yum &>/dev/null; then
+      features="${features},system-dnf"
+    elif command -v pacman &>/dev/null; then
+      features="${features},system-pacman"
+    elif command -v apk &>/dev/null; then
+      features="${features},system-apk"
+    elif command -v zypper &>/dev/null; then
+      features="${features},system-zypper,system-dnf"
+    elif command -v xbps-install &>/dev/null; then
+      features="${features},system-xbps"
+    elif command -v emerge &>/dev/null; then
+      features="${features},system-emerge"
+    elif command -v nix-env &>/dev/null || command -v nix &>/dev/null; then
+      features="${features},system-nix"
+    elif command -v opkg &>/dev/null; then
+      features="${features},system-opkg"
+    elif command -v eopkg &>/dev/null; then
+      features="${features},system-eopkg"
+    elif command -v swupd &>/dev/null; then
+      features="${features},system-swupd"
+    fi
+  fi
+
+  echo "$features"
+}
+
 install_from_repo() {
   local root="$1"
   if ! command -v cargo &>/dev/null; then
     die "cargo not in PATH — install Rust from https://rustup.rs/ or use OIL_USE_RELEASE=1 to download a binary."
   fi
-  info "Building oil from local checkout (${root})…"
-  ( cd "$root" && cargo build --release )
+
+  local build_features
+  if [ "${OIL_BUILD_ALL:-0}" = "1" ]; then
+    info "Building oil from local checkout (${root}) with all features…"
+    ( cd "$root" && cargo build --release )
+  else
+    build_features="${OIL_BUILD_FEATURES:-$(detect_features)}"
+    info "Building oil from local checkout (${root}) with features: ${build_features}…"
+    ( cd "$root" && cargo build --release --no-default-features --features "$build_features" )
+  fi
+
   mkdir -p "$INSTALL_DIR"
   cp "${root}/target/release/oil" "${INSTALL_DIR}/oil"
   chmod +x "${INSTALL_DIR}/oil"
