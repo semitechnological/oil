@@ -143,13 +143,17 @@ install_from_release() {
     Linux)   os="linux" ;;
     Darwin)  os="macos" ;;
     FreeBSD) os="freebsd" ;;
+    OpenBSD) os="openbsd" ;;
     *)       die "Unsupported OS: $OS" ;;
   esac
 
   case "$ARCH" in
-    x86_64|amd64)          arch="x64"   ;;
-    aarch64|arm64)         arch="arm64" ;;
-    *)                     die "Unsupported architecture: $ARCH" ;;
+    x86_64|amd64)                 arch="x64"    ;;
+    aarch64|arm64)                arch="arm64"  ;;
+    armv7*|armv8*|armhf)          arch="armv7"  ;;
+    mips)                         arch="mips"   ;;
+    mipsel)                       arch="mipsel" ;;
+    *)                            die "Unsupported architecture: $ARCH" ;;
   esac
 
   ASSET="oil-${os}-${arch}"
@@ -175,6 +179,14 @@ install_from_release() {
       ASSET="${ASSET}-void"
     elif [[ "$all_ids" =~ "nixos" ]]; then
       ASSET="${ASSET}-nix"
+    elif [[ "$all_ids" =~ "gentoo" ]]; then
+      ASSET="${ASSET}-gentoo"
+    elif [[ "$all_ids" =~ "solus" ]]; then
+      ASSET="${ASSET}-solus"
+    elif [[ "$all_ids" =~ "openwrt" || "$all_ids" =~ "lede" ]]; then
+      ASSET="oil-linux-${arch}-musl"
+    elif [[ "$all_ids" =~ "clear-linux" || "$all_ids" =~ "clearlinux" ]]; then
+      ASSET="${ASSET}-swupd"
     else
       # Fallback check for musl libc
       if command -v ldd &>/dev/null && ldd /bin/ls 2>&1 | grep -q 'musl'; then

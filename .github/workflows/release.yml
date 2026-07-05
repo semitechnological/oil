@@ -285,6 +285,55 @@ jobs:
             asset_name: oil-freebsd-arm64
             container: ''
 
+          - distro: gentoo
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+            asset_name: oil-linux-x64-gentoo
+            container: ubuntu:24.04
+
+          - distro: gentoo
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            asset_name: oil-linux-arm64-gentoo
+            container: ubuntu:24.04
+
+          - distro: solus
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+            asset_name: oil-linux-x64-solus
+            container: ubuntu:24.04
+
+          - distro: solus
+            arch: arm64
+            target: aarch64-unknown-linux-gnu
+            asset_name: oil-linux-arm64-solus
+            container: ubuntu:24.04
+
+          - distro: openwrt
+            arch: armv7
+            target: armv7-unknown-linux-musleabihf
+            asset_name: oil-linux-armv7-musl
+            container: ubuntu:24.04
+
+          - distro: openwrt
+            arch: mips
+            target: mips-unknown-linux-musl
+            asset_name: oil-linux-mips-musl
+            container: ubuntu:24.04
+
+          - distro: openwrt
+            arch: mipsel
+            target: mipsel-unknown-linux-musl
+            asset_name: oil-linux-mipsel-musl
+            container: ubuntu:24.04
+
+          - distro: swupd
+            arch: x64
+            target: x86_64-unknown-linux-gnu
+            asset_name: oil-linux-x64-swupd
+            container: ubuntu:24.04
+
+
     env:
       HOME: /root
     steps:
@@ -321,15 +370,28 @@ jobs:
         run: |
           xbps-install -Sy curl gcc pkg-config openssl-devel make
 
-      - name: Install cross-compilation tools (ARM64)
-        if: matrix.arch == 'arm64' && matrix.distro != 'freebsd'
+      - name: Install cross-compilation tools (openwrt / ARM64)
+        if: (matrix.arch == 'arm64' || matrix.distro == 'openwrt') && matrix.distro != 'freebsd' && matrix.distro != 'openbsd'
         run: |
           if command -v apt-get &>/dev/null; then
-            apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+            apt-get update
+            if [ "${{ matrix.arch }}" = "arm64" ]; then
+              apt-get install -y gcc-aarch64-linux-gnu
+            elif [ "${{ matrix.arch }}" = "armv7" ]; then
+              apt-get install -y gcc-arm-linux-gnueabihf
+            elif [ "${{ matrix.arch }}" = "mips" ]; then
+              apt-get install -y gcc-mips-linux-gnu
+            elif [ "${{ matrix.arch }}" = "mipsel" ]; then
+              apt-get install -y gcc-mipsel-linux-gnu
+            fi
           elif command -v dnf &>/dev/null; then
-            dnf install -y gcc-aarch64-linux-gnu
+            if [ "${{ matrix.arch }}" = "arm64" ]; then
+              dnf install -y gcc-aarch64-linux-gnu
+            fi
           elif command -v pacman &>/dev/null; then
-            pacman -S --noconfirm aarch64-linux-gnu-gcc
+            if [ "${{ matrix.arch }}" = "arm64" ]; then
+              pacman -S --noconfirm aarch64-linux-gnu-gcc
+            fi
           fi
 
       - name: Install Rust
@@ -348,14 +410,33 @@ jobs:
           echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
           echo 'rustflags = ["-C", "linker-flavor=ld.lld"]' >> ~/.cargo/config.toml
 
+      - name: Create OpenWrt cargo config
+        if: matrix.distro == 'openwrt'
+        run: |
+          mkdir -p ~/.cargo
+          if [ "${{ matrix.arch }}" = "armv7" ]; then
+            echo '[target.armv7-unknown-linux-musleabihf]' >> ~/.cargo/config.toml
+            echo 'linker = "arm-linux-gnueabihf-gcc"' >> ~/.cargo/config.toml
+            echo "CC=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
+          elif [ "${{ matrix.arch }}" = "mips" ]; then
+            echo '[target.mips-unknown-linux-musl]' >> ~/.cargo/config.toml
+            echo 'linker = "mips-linux-gnu-gcc"' >> ~/.cargo/config.toml
+            echo "CC=mips-linux-gnu-gcc" >> $GITHUB_ENV
+          elif [ "${{ matrix.arch }}" = "mipsel" ]; then
+            echo '[target.mipsel-unknown-linux-musl]' >> ~/.cargo/config.toml
+            echo 'linker = "mipsel-linux-gnu-gcc"' >> ~/.cargo/config.toml
+            echo "CC=mipsel-linux-gnu-gcc" >> $GITHUB_ENV
+          fi
+
       - name: Create ARM64 cargo config
-        if: matrix.arch == 'arm64' && matrix.distro != 'freebsd'
+        if: matrix.arch == 'arm64' && matrix.distro != 'freebsd' && matrix.distro != 'openwrt'
         run: |
           mkdir -p ~/.cargo
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
           echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+
 
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
@@ -420,6 +501,36 @@ jobs:
           files: |
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-openbsd:
+    name: Build OpenBSD (x64)
+    runs-on: ubuntu-latest
+    needs: [check-version, create-release]
+    if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on OpenBSD
+        uses: cross-platform-actions/action@v0.25.0
+        with:
+          operating_system: openbsd
+          version: '7.5'
+          run: |
+            sudo pkg_add -I rust
+            cargo build --release
+      - name: Prepare binary
+        run: |
+          cp target/release/oil oil-openbsd-x64
+          chmod +x oil-openbsd-x64
+          shasum -a 256 oil-openbsd-x64 | awk '{print $1}' > oil-openbsd-x64.sha256
+      - name: Upload binary to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
+          files: |
+            oil-openbsd-x64
+            oil-openbsd-x64.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
