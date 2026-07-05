@@ -44,7 +44,7 @@ jobs:
     name: Auto-tag on version bump
     runs-on: ubuntu-latest
     needs: check
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -330,7 +330,7 @@ jobs:
           xbps-install -Sy curl gcc pkg-config openssl-devel make
 
       - name: Install cross-compilation tools (openwrt / ARM64)
-        if: (matrix.arch == 'arm64' || matrix.distro == 'openwrt') && matrix.distro != 'freebsd' && matrix.distro != 'openbsd'
+        if: ${{ (matrix.arch == 'arm64' || matrix.distro == 'openwrt') && matrix.distro != 'freebsd' && matrix.distro != 'openbsd' }}
         run: |
           if command -v apt-get &>/dev/null; then
             apt-get update
@@ -355,13 +355,13 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        if: !(matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel'))
+        if: ${{ !(matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel')) }}
         with:
           targets: ${{ matrix.target }}
 
       - name: Install Rust (Nightly for Tier 3 OpenWrt targets)
         uses: dtolnay/rust-toolchain@stable
-        if: matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel')
+        if: ${{ matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel') }}
         with:
           toolchain: nightly
           targets: ${{ matrix.target }}
