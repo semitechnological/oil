@@ -162,28 +162,13 @@ jobs:
             git push origin "$TAG"
           fi
 
-  create-release:
-    name: Create GitHub release
-    runs-on: ubuntu-latest
-    needs: [check-version, generate-notes, create-tag]
-    if: always() && needs.check-version.outputs.should_release == 'true'
-    steps:
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.check-version.outputs.version }}
-          name: v${{ needs.check-version.outputs.version }}
-          body: ${{ needs.generate-notes.outputs.release_notes }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   build:
     name: Build ${{ matrix.distro }} (${{ matrix.arch }})
     runs-on: ubuntu-latest
     container: ${{ matrix.container }}
-    needs: [check-version, create-release]
+    needs: [check-version]
     if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
@@ -454,20 +439,18 @@ jobs:
             shasum -a 256 ${{ matrix.asset_name }} | awk '{print $1}' > ${{ matrix.asset_name }}.sha256
           fi
 
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
-          files: |
+          name: ${{ matrix.asset_name }}
+          path: |
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
     name: Build macOS (${{ matrix.arch }})
     runs-on: macos-latest
-    needs: [check-version, create-release]
+    needs: [check-version]
     if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
     strategy:
       fail-fast: false
@@ -494,20 +477,18 @@ jobs:
       - name: Checksum
         run: |
           shasum -a 256 ${{ matrix.asset_name }} | awk '{print $1}' > ${{ matrix.asset_name }}.sha256
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
-          files: |
+          name: ${{ matrix.asset_name }}
+          path: |
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-openbsd:
     name: Build OpenBSD (x64)
     runs-on: ubuntu-latest
-    needs: [check-version, create-release]
+    needs: [check-version]
     if: always() && (needs.check-version.outputs.should_release == 'true' || github.event_name == 'workflow_dispatch')
     steps:
       - uses: actions/checkout@v4
@@ -524,13 +505,36 @@ jobs:
           cp target/release/oil oil-openbsd-x64
           chmod +x oil-openbsd-x64
           shasum -a 256 oil-openbsd-x64 | awk '{print $1}' > oil-openbsd-x64.sha256
-      - name: Upload binary to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: v${{ needs.check-version.outputs.version || github.event.inputs.version }}
-          files: |
+          name: oil-openbsd-x64
+          path: |
             oil-openbsd-x64
             oil-openbsd-x64.sha256
+
+  create-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs: [check-version, generate-notes, create-tag, build, build-macos, build-openbsd]
+    if: always() && needs.check-version.outputs.should_release == 'true' && (needs.build.result == 'success') && (needs.build-macos.result == 'success') && (needs.build-openbsd.result == 'success')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: oil-*
+          merge-multiple: true
+
+      - name: Create release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: v${{ needs.check-version.outputs.version }}
+          body: ${{ needs.generate-notes.outputs.release_notes }}
+          draft: false
+          prerelease: false
+          files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
