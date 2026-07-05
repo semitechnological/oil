@@ -142,8 +142,6 @@ install_from_release() {
   case "$OS" in
     Linux)   os="linux" ;;
     Darwin)  os="macos" ;;
-    FreeBSD) os="freebsd" ;;
-    OpenBSD) os="openbsd" ;;
     *)       die "Unsupported OS: $OS" ;;
   esac
 
@@ -179,14 +177,10 @@ install_from_release() {
       ASSET="${ASSET}-void"
     elif [[ "$all_ids" =~ "nixos" ]]; then
       ASSET="${ASSET}-nix"
-    elif [[ "$all_ids" =~ "gentoo" ]]; then
-      ASSET="${ASSET}-gentoo"
     elif [[ "$all_ids" =~ "solus" ]]; then
       ASSET="${ASSET}-solus"
     elif [[ "$all_ids" =~ "openwrt" || "$all_ids" =~ "lede" ]]; then
       ASSET="oil-linux-${arch}-musl"
-    elif [[ "$all_ids" =~ "clear-linux" || "$all_ids" =~ "clearlinux" ]]; then
-      ASSET="${ASSET}-swupd"
     else
       # Fallback check for musl libc
       if command -v ldd &>/dev/null && ldd /bin/ls 2>&1 | grep -q 'musl'; then

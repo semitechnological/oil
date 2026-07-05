@@ -217,16 +217,6 @@ jobs:
             asset_name: oil-linux-arm64-nix
 
 
-          - distro: gentoo
-            arch: x64
-            target: x86_64-unknown-linux-gnu
-            asset_name: oil-linux-x64-gentoo
-
-          - distro: gentoo
-            arch: arm64
-            target: aarch64-unknown-linux-gnu
-            asset_name: oil-linux-arm64-gentoo
-
           - distro: solus
             arch: x64
             target: x86_64-unknown-linux-gnu
@@ -251,11 +241,6 @@ jobs:
             arch: mipsel
             target: mipsel-unknown-linux-musl
             asset_name: oil-linux-mipsel-musl
-
-          - distro: swupd
-            arch: x64
-            target: x86_64-unknown-linux-gnu
-            asset_name: oil-linux-x64-swupd
 
 
     steps:
@@ -395,67 +380,10 @@ jobs:
             ${{ matrix.asset_name }}
             ${{ matrix.asset_name }}.sha256
 
-  build-openbsd:
-    name: Build OpenBSD (x64)
-    runs-on: ubuntu-latest
-    needs: check
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build on OpenBSD
-        uses: cross-platform-actions/action@v0.25.0
-        with:
-          operating_system: openbsd
-          version: '7.5'
-          run: |
-            sudo pkg_add -I rust gmake
-            export PATH="/usr/local/bin:$PATH"
-            cargo build --release
-      - name: Prepare binary
-        run: |
-          cp target/release/oil oil-openbsd-x64
-          chmod +x oil-openbsd-x64
-          shasum -a 256 oil-openbsd-x64 | awk '{print $1}' > oil-openbsd-x64.sha256
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: oil-openbsd-x64
-          path: |
-            oil-openbsd-x64
-            oil-openbsd-x64.sha256
-
-  build-freebsd:
-    name: Build FreeBSD (x64)
-    runs-on: ubuntu-latest
-    needs: check
-    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build on FreeBSD
-        uses: cross-platform-actions/action@v0.25.0
-        with:
-          operating_system: freebsd
-          version: '14.0'
-          run: |
-            sudo pkg install -y rust gmake git
-            cargo build --release
-      - name: Prepare binary
-        run: |
-          cp target/release/oil oil-freebsd-x64
-          chmod +x oil-freebsd-x64
-          shasum -a 256 oil-freebsd-x64 | awk '{print $1}' > oil-freebsd-x64.sha256
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: oil-freebsd-x64
-          path: |
-            oil-freebsd-x64
-            oil-freebsd-x64.sha256
-
   create-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [check, generate-notes, build, build-macos, build-openbsd, build-freebsd]
+    needs: [check, generate-notes, build, build-macos]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Download all artifacts
