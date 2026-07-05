@@ -140,9 +140,10 @@ install_from_release() {
   ARCH="$(uname -m)"
 
   case "$OS" in
-    Linux)  os="linux" ;;
-    Darwin) os="macos" ;;
-    *)      die "Unsupported OS: $OS" ;;
+    Linux)   os="linux" ;;
+    Darwin)  os="macos" ;;
+    FreeBSD) os="freebsd" ;;
+    *)       die "Unsupported OS: $OS" ;;
   esac
 
   case "$ARCH" in
@@ -168,6 +169,12 @@ install_from_release() {
       ASSET="${ASSET}-arch"
     elif [[ "$all_ids" =~ "alpine" || "$all_ids" =~ "chimera" ]]; then
       ASSET="${ASSET}-musl"
+    elif [[ "$all_ids" =~ "suse" || "$all_ids" =~ "opensuse" || "$all_ids" =~ "sles" ]]; then
+      ASSET="${ASSET}-opensuse"
+    elif [[ "$all_ids" =~ "void" ]]; then
+      ASSET="${ASSET}-void"
+    elif [[ "$all_ids" =~ "nixos" ]]; then
+      ASSET="${ASSET}-nix"
     else
       # Fallback check for musl libc
       if command -v ldd &>/dev/null && ldd /bin/ls 2>&1 | grep -q 'musl'; then
