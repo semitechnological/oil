@@ -216,15 +216,6 @@ jobs:
             target: aarch64-unknown-linux-musl
             asset_name: oil-linux-arm64-nix
 
-          - distro: freebsd
-            arch: x64
-            target: x86_64-unknown-freebsd
-            asset_name: oil-freebsd-x64
-
-          - distro: freebsd
-            arch: arm64
-            target: aarch64-unknown-freebsd
-            asset_name: oil-freebsd-arm64
 
           - distro: gentoo
             arch: x64
@@ -300,19 +291,7 @@ jobs:
         if: ${{ matrix.distro == 'openwrt' && (matrix.arch == 'mips' || matrix.arch == 'mipsel') }}
         with:
           toolchain: nightly
-          targets: ${{ matrix.target }}
           components: rust-src
-
-      - name: Create FreeBSD cargo config
-        if: matrix.distro == 'freebsd'
-        run: |
-          mkdir -p ~/.cargo
-          echo '[target.x86_64-unknown-freebsd]' >> ~/.cargo/config.toml
-          echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
-          echo 'rustflags = ["-C", "linker-flavor=ld.lld"]' >> ~/.cargo/config.toml
-          echo '[target.aarch64-unknown-freebsd]' >> ~/.cargo/config.toml
-          echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
-          echo 'rustflags = ["-C", "linker-flavor=ld.lld"]' >> ~/.cargo/config.toml
 
       - name: Create OpenWrt cargo config
         if: matrix.distro == 'openwrt'
@@ -445,10 +424,38 @@ jobs:
             oil-openbsd-x64
             oil-openbsd-x64.sha256
 
+  build-freebsd:
+    name: Build FreeBSD (x64)
+    runs-on: ubuntu-latest
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on FreeBSD
+        uses: cross-platform-actions/action@v0.25.0
+        with:
+          operating_system: freebsd
+          version: '14.0'
+          run: |
+            sudo pkg install -y rust gmake git
+            cargo build --release
+      - name: Prepare binary
+        run: |
+          cp target/release/oil oil-freebsd-x64
+          chmod +x oil-freebsd-x64
+          shasum -a 256 oil-freebsd-x64 | awk '{print $1}' > oil-freebsd-x64.sha256
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: oil-freebsd-x64
+          path: |
+            oil-freebsd-x64
+            oil-freebsd-x64.sha256
+
   create-release:
     name: Create GitHub release
     runs-on: ubuntu-latest
-    needs: [check, generate-notes, build, build-macos, build-openbsd]
+    needs: [check, generate-notes, build, build-macos, build-openbsd, build-freebsd]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Download all artifacts
