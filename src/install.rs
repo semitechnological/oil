@@ -7,9 +7,71 @@ use crate::ui::dirs;
 use crate::version::sort_versions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tracing::{debug, instrument};
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::<OsString>::new();
+    let mut has_root = false;
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(_) => {
+                components.clear();
+                components.push(component.as_os_str().to_os_string());
+                has_root = false;
+            }
+            std::path::Component::RootDir => {
+                components.clear();
+                components.push(component.as_os_str().to_os_string());
+                has_root = true;
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if let Some(last) = components.last() {
+                    if last.as_os_str() == OsStr::new("..") {
+                        components.push(OsString::from(".."));
+                    } else if !(has_root && components.len() == 1) {
+                        components.pop();
+                    }
+                } else {
+                    components.push(OsString::from(".."));
+                }
+            }
+            std::path::Component::Normal(part) => components.push(part.to_os_string()),
+        }
+    }
+    if components.is_empty() {
+        PathBuf::from(".")
+    } else {
+        components.into_iter().collect()
+    }
+}
+
+fn relative_path(from: &Path, to: &Path) -> PathBuf {
+    let from = normalize_path(from);
+    let to = normalize_path(to);
+    let from_components: Vec<_> = from.components().collect();
+    let to_components: Vec<_> = to.components().collect();
+    let common = from_components
+        .iter()
+        .zip(&to_components)
+        .take_while(|(from, to)| from == to)
+        .count();
+    let mut relative = PathBuf::new();
+    for _ in common..from_components.len() {
+        relative.push("..");
+    }
+    for component in &to_components[common..] {
+        relative.push(component.as_os_str());
+    }
+    if relative.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        relative
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -409,8 +471,9 @@ pub async fn create_symlinks(
         #[cfg(unix)]
         {
             use std::os::unix::fs::symlink;
-            symlink(&formula_path, &opt_link)
-                .or_else(|_| sudo::sudo_symlink(&formula_path, &opt_link).map(|_| ()))?;
+            let link_target = relative_path(&opt_dir, &formula_path);
+            symlink(&link_target, &opt_link)
+                .or_else(|_| sudo::sudo_symlink(&link_target, &opt_link).map(|_| ()))?;
         }
         created_links.push(opt_link);
     }
@@ -432,7 +495,7 @@ fn link_directory_recursive<'a>(
             let file_name = entry.file_name();
             let source_path = entry.path();
             let target_path = target_dir.join(&file_name);
-            let source_meta = entry.metadata().await?;
+            let source_meta = fs::symlink_metadata(&source_path).await?;
 
             // Safety check: ensure source is actually inside the formula path
             if !source_path.starts_with(formula_base) {
@@ -465,23 +528,21 @@ fn link_directory_recursive<'a>(
                 }
 
                 if !dry_run {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::symlink;
-                        symlink(&source_path, &target_path).or_else(|_| {
-                            sudo::sudo_symlink(&source_path, &target_path).map(|_| ())
-                        })?;
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        return Err(OilError::PlatformNotSupported(
-                            "Symlinks not supported on this platform".to_string(),
-                        ));
-                    }
+                    fs::create_dir(&target_path)
+                        .await
+                        .or_else(|_| sudo::sudo_mkdir(&target_path))?;
                 }
-                created_links.push(target_path);
+                link_directory_recursive(
+                    &source_path,
+                    &target_path,
+                    formula_base,
+                    dry_run,
+                    created_links,
+                )
+                .await?;
             } else {
-                if target_path.symlink_metadata().is_ok() {
+                let link_target = relative_path(target_path.parent().unwrap(), &source_path);
+                if fs::symlink_metadata(&target_path).await.is_ok() {
                     if !dry_run {
                         debug!("Removing existing symlink/file at {:?}", target_path);
                         fs::remove_file(&target_path)
@@ -497,8 +558,8 @@ fn link_directory_recursive<'a>(
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::symlink;
-                        symlink(&source_path, &target_path).or_else(|_| {
-                            sudo::sudo_symlink(&source_path, &target_path).map(|_| ())
+                        symlink(&link_target, &target_path).or_else(|_| {
+                            sudo::sudo_symlink(&link_target, &target_path).map(|_| ())
                         })?;
                     }
                     #[cfg(not(unix))]
@@ -549,7 +610,9 @@ pub async fn remove_symlinks(
         unlink_directory_recursive(
             &source_dir,
             &target_dir,
+            &target_dir,
             &formula_path,
+            &prefix,
             dry_run,
             &mut removed_links,
         )
@@ -562,8 +625,12 @@ pub async fn remove_symlinks(
         if let Ok(metadata) = fs::symlink_metadata(&opt_link).await {
             if metadata.is_symlink() {
                 if let Ok(link_target) = fs::read_link(&opt_link).await {
-                    let link_target = dunce::canonicalize(&link_target).unwrap_or(link_target);
-                    if link_target.starts_with(&formula_path) {
+                    let resolved = if link_target.is_absolute() {
+                        normalize_path(&link_target)
+                    } else {
+                        normalize_path(&opt_link.parent().unwrap().join(link_target))
+                    };
+                    if resolved.starts_with(&formula_path) {
                         if !dry_run {
                             fs::remove_file(&opt_link)
                                 .await
@@ -580,10 +647,20 @@ pub async fn remove_symlinks(
     Ok(removed_links)
 }
 
+async fn is_dir_empty(path: &Path) -> bool {
+    let mut entries = match fs::read_dir(path).await {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+    matches!(entries.next_entry().await, Ok(None))
+}
+
 fn unlink_directory_recursive<'a>(
     source_dir: &'a Path,
     target_dir: &'a Path,
+    top_target_dir: &'a Path,
     formula_path: &'a Path,
+    prefix: &'a Path,
     dry_run: bool,
     removed_links: &'a mut Vec<PathBuf>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
@@ -597,6 +674,7 @@ fn unlink_directory_recursive<'a>(
             let file_name = entry.file_name();
             let source_path = entry.path();
             let target_path = target_dir.join(&file_name);
+            let source_meta = fs::symlink_metadata(&source_path).await?;
 
             let target_meta = match fs::symlink_metadata(&target_path).await {
                 Ok(m) => m,
@@ -607,8 +685,12 @@ fn unlink_directory_recursive<'a>(
             {
                 if target_meta.is_symlink() {
                     if let Ok(link_target) = fs::read_link(&target_path).await {
-                        let link_target = dunce::canonicalize(&link_target).unwrap_or(link_target);
-                        if link_target.starts_with(formula_path) {
+                        let resolved = if link_target.is_absolute() {
+                            normalize_path(&link_target)
+                        } else {
+                            normalize_path(&target_path.parent().unwrap().join(link_target))
+                        };
+                        if resolved.starts_with(formula_path) {
                             if !dry_run {
                                 fs::remove_file(&target_path)
                                     .await
@@ -617,17 +699,29 @@ fn unlink_directory_recursive<'a>(
                             removed_links.push(target_path);
                         }
                     }
-                } else if target_meta.is_dir() && source_path.is_dir() {
+                } else if target_meta.is_dir() && source_meta.is_dir() {
                     unlink_directory_recursive(
                         &source_path,
                         &target_path,
+                        top_target_dir,
                         formula_path,
+                        prefix,
                         dry_run,
                         removed_links,
                     )
                     .await?;
                 }
             }
+        }
+
+        if !dry_run
+            && target_dir != top_target_dir
+            && target_dir.starts_with(prefix)
+            && is_dir_empty(target_dir).await
+        {
+            fs::remove_dir(target_dir)
+                .await
+                .or_else(|_| sudo::sudo_remove(target_dir).map(|_| ()))?;
         }
         Ok(())
     })

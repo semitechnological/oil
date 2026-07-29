@@ -208,7 +208,6 @@ pub fn sudo_mkdir(path: &Path) -> Result<()> {
 
 pub fn sudo_symlink(src: &Path, dst: &Path) -> Result<()> {
     acquire_sudo()?;
-    let src = normalize_path(src);
     let dst = normalize_path(dst);
 
     // Remove target if it exists, using sudo to be sure
@@ -220,8 +219,8 @@ pub fn sudo_symlink(src: &Path, dst: &Path) -> Result<()> {
         .status();
 
     let status = Command::new("sudo")
-        .args(["ln", "-sf", "--"])
-        .arg(&src)
+        .args(["ln", "-sfn", "--"])
+        .arg(src)
         .arg(&dst)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
@@ -230,7 +229,7 @@ pub fn sudo_symlink(src: &Path, dst: &Path) -> Result<()> {
 
     if !status.success() {
         return Err(OilError::InstallError(format!(
-            "sudo ln -sf {} {} failed",
+            "sudo ln -sfn {} {} failed",
             src.display(),
             dst.display()
         )));

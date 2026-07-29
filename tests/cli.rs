@@ -375,7 +375,6 @@ fn list_plain_no_match_reports_query() {
 }
 
 #[test]
-#[test]
 fn tap_list_exits_zero() {
     let tmp = tempfile::tempdir().unwrap();
     let out = oil_bin()

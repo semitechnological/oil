@@ -43,6 +43,8 @@ pub struct BottleInfo {
 pub struct BottleStable {
     #[serde(default)]
     pub rebuild: u32,
+    #[serde(default)]
+    pub cellar: Option<String>,
     pub files: std::collections::HashMap<String, BottleFile>,
 }
 
@@ -60,6 +62,19 @@ impl BottleStable {
                 "aarch64_linux" => self.files.get("arm64_linux"),
                 _ => None,
             })
+    }
+
+    pub fn compatible_with(&self, cellar: &std::path::Path) -> bool {
+        match self.cellar.as_deref() {
+            None | Some("any") | Some("any_skip_relocation") => true,
+            Some(expected) => {
+                let expected = std::path::Path::new(expected);
+                match (dunce::canonicalize(expected), dunce::canonicalize(cellar)) {
+                    (Ok(expected), Ok(cellar)) => expected == cellar,
+                    _ => expected == cellar,
+                }
+            }
+        }
     }
 }
 
@@ -368,7 +383,11 @@ mod bottle_stable_tests {
     fn file_for_platform_matches_arm64_when_json_has_aarch64_linux() {
         let mut files = HashMap::new();
         files.insert("aarch64_linux".into(), sample_file());
-        let stable = BottleStable { rebuild: 0, files };
+        let stable = BottleStable {
+            rebuild: 0,
+            cellar: None,
+            files,
+        };
         let f = stable
             .file_for_platform("arm64_linux")
             .expect("aarch64_linux alias");
@@ -379,10 +398,29 @@ mod bottle_stable_tests {
     fn file_for_platform_matches_aarch64_when_json_has_arm64_linux() {
         let mut files = HashMap::new();
         files.insert("arm64_linux".into(), sample_file());
-        let stable = BottleStable { rebuild: 0, files };
+        let stable = BottleStable {
+            rebuild: 0,
+            cellar: None,
+            files,
+        };
         let f = stable
             .file_for_platform("aarch64_linux")
             .expect("arm64_linux alias");
         assert_eq!(f.sha256, "deadbeef");
+    }
+
+    #[test]
+    fn bottle_cellar_compatibility() {
+        let mut stable = BottleStable {
+            rebuild: 0,
+            cellar: None,
+            files: HashMap::new(),
+        };
+        assert!(stable.compatible_with(std::path::Path::new("/any/path")));
+        stable.cellar = Some("any".into());
+        assert!(stable.compatible_with(std::path::Path::new("/any/path")));
+        stable.cellar = Some("/opt/oil/Cellar".into());
+        assert!(stable.compatible_with(std::path::Path::new("/opt/oil/Cellar")));
+        assert!(!stable.compatible_with(std::path::Path::new("/other/Cellar")));
     }
 }
