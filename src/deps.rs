@@ -81,6 +81,7 @@ impl Default for DependencyGraph {
 }
 
 #[instrument(skip(formulae))]
+#[expect(dead_code, reason = "dependency resolver API")]
 pub fn resolve_dependencies(
     formula: &Formula,
     formulae: &[Formula],

@@ -39,6 +39,7 @@ impl HookPm {
         }
     }
 
+    #[expect(dead_code, reason = "CLI hook identifier")]
     pub fn label(self) -> &'static str {
         match self {
             Self::Apt => "apt",

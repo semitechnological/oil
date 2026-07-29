@@ -251,19 +251,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl gcc g++ pkg-config libssl-dev musl-tools
 
-      - name: Install cross-compilation tools (openwrt / ARM64)
-        if: ${{ (matrix.arch == 'arm64' || matrix.distro == 'openwrt') && matrix.distro != 'freebsd' && matrix.distro != 'openbsd' }}
+      - name: Install GNU ARM64 cross-compiler
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get update
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu
-          elif [ "${{ matrix.arch }}" = "armv7" ]; then
-            sudo apt-get install -y gcc-arm-linux-gnueabihf
-          elif [ "${{ matrix.arch }}" = "mips" ]; then
-            sudo apt-get install -y gcc-mips-linux-gnu
-          elif [ "${{ matrix.arch }}" = "mipsel" ]; then
-            sudo apt-get install -y gcc-mipsel-linux-gnu
-          fi
+          sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -278,47 +270,39 @@ jobs:
           toolchain: nightly
           components: rust-src
 
-      - name: Create OpenWrt cargo config
-        if: matrix.distro == 'openwrt'
-        run: |
-          mkdir -p ~/.cargo
-          if [ "${{ matrix.arch }}" = "armv7" ]; then
-            echo '[target.armv7-unknown-linux-musleabihf]' >> ~/.cargo/config.toml
-            echo 'linker = "arm-linux-gnueabihf-gcc"' >> ~/.cargo/config.toml
-            echo "CC=arm-linux-gnueabihf-gcc" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" = "mips" ]; then
-            echo '[target.mips-unknown-linux-musl]' >> ~/.cargo/config.toml
-            echo 'linker = "mips-linux-gnu-gcc"' >> ~/.cargo/config.toml
-            echo "CC=mips-linux-gnu-gcc" >> $GITHUB_ENV
-          elif [ "${{ matrix.arch }}" = "mipsel" ]; then
-            echo '[target.mipsel-unknown-linux-musl]' >> ~/.cargo/config.toml
-            echo 'linker = "mipsel-linux-gnu-gcc"' >> ~/.cargo/config.toml
-            echo "CC=mipsel-linux-gnu-gcc" >> $GITHUB_ENV
-          fi
-
       - name: Create ARM64 cargo config
-        if: ${{ matrix.arch == 'arm64' && matrix.distro != 'freebsd' && matrix.distro != 'openwrt' }}
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
           mkdir -p ~/.cargo
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
-          echo '[target.aarch64-unknown-linux-musl]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_musl=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
-      - name: Create musl cargo config
-        if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
-        run: |
-          echo "CC_x86_64_unknown_linux_musl=musl-gcc" >> $GITHUB_ENV
+      - name: Install Zig
+        if: contains(matrix.target, '-musl') && matrix.arch != 'mips' && matrix.arch != 'mipsel'
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.14.1
 
+      - name: Install cargo-zigbuild
+        if: contains(matrix.target, '-musl') && matrix.arch != 'mips' && matrix.arch != 'mipsel'
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Install Cross
+        if: matrix.arch == 'mips' || matrix.arch == 'mipsel'
+        run: cargo install cross --version 0.2.5 --locked
 
       - name: Build release binary
+        env:
+          TARGET: ${{ matrix.target }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [ "${{ matrix.distro }}" = "openwrt" ] && { [ "${{ matrix.arch }}" = "mips" ] || [ "${{ matrix.arch }}" = "mipsel" ]; }; then
-            cargo build --release --target ${{ matrix.target }} -Z build-std
+          if [ "$ARCH" = "mips" ] || [ "$ARCH" = "mipsel" ]; then
+            cross +nightly build --release --target "$TARGET" -Z build-std
+          elif [[ "$TARGET" == *-musl* ]]; then
+            cargo zigbuild --release --target "$TARGET"
           else
-            cargo build --release --target ${{ matrix.target }}
+            cargo build --release --target "$TARGET"
           fi
 
       - name: Prepare binary
@@ -404,4 +388,3 @@ jobs:
           files: release-assets/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

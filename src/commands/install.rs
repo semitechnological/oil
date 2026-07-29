@@ -1132,8 +1132,14 @@ async fn install_impl(
                     overall_w.finish_and_clear();
                     return;
                 }
-                let pos = totals_w.downloaded.load(Ordering::Relaxed);
-                let len = totals_w.expected.load(Ordering::Relaxed);
+                let pos = *totals_w
+                    .downloaded
+                    .lock()
+                    .expect("download totals mutex poisoned");
+                let len = *totals_w
+                    .expected
+                    .lock()
+                    .expect("download totals mutex poisoned");
                 let cap = len.max(pos).max(1);
                 overall_w.set_length(cap);
                 overall_w.set_position(pos);
@@ -1984,8 +1990,14 @@ async fn install_casks(
                         overall_w.finish_and_clear();
                         return;
                     }
-                    let pos = totals_w.downloaded.load(Ordering::Relaxed);
-                    let len = totals_w.expected.load(Ordering::Relaxed);
+                    let pos = *totals_w
+                        .downloaded
+                        .lock()
+                        .expect("download totals mutex poisoned");
+                    let len = *totals_w
+                        .expected
+                        .lock()
+                        .expect("download totals mutex poisoned");
                     let cap = len.max(pos).max(1);
                     overall_w.set_length(cap);
                     overall_w.set_position(pos);

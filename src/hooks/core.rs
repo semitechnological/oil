@@ -144,6 +144,7 @@ pub fn remove_root_file(path: &Path) -> Result<()> {
 }
 
 /// One-line preinstall helper for hook scripts (apt .deb loop, pacman %p, etc.).
+#[expect(dead_code, reason = "hook script helper")]
 pub fn preinstall_shell_fragment(oil_bin: &Path) -> String {
     let oil = shell_escape(oil_bin);
     format!("{oil} __pm-preinstall --pkg")

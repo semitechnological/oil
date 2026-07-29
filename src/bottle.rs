@@ -1,12 +1,11 @@
-use crate::error::{Result, OilError};
+use crate::error::{OilError, Result};
 use flate2::read::GzDecoder;
 use indicatif::ProgressBar;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tar::Archive;
@@ -16,8 +15,8 @@ use tracing::{debug, instrument};
 /// Tracks aggregate downloaded / expected bytes across concurrent downloads (e.g. multiple casks).
 #[derive(Clone, Default)]
 pub struct DownloadTotals {
-    pub downloaded: Arc<AtomicU64>,
-    pub expected: Arc<AtomicU64>,
+    pub downloaded: Arc<Mutex<u64>>,
+    pub expected: Arc<Mutex<u64>>,
 }
 
 pub struct BottleDownloader {
@@ -104,7 +103,7 @@ impl BottleDownloader {
 
         if let Some(t) = totals {
             if total_size > 0 {
-                t.expected.fetch_add(total_size, Ordering::Relaxed);
+                *t.expected.lock().expect("download totals mutex poisoned") += total_size;
             }
         }
 
@@ -236,7 +235,7 @@ impl BottleDownloader {
             f.set_len(total_size)?;
         }
 
-        let downloaded_so_far = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let downloaded_so_far = Arc::new(Mutex::new(0));
         let client = self.client.clone();
         let url = url.to_string();
         let dest_path_buf = dest_path.to_path_buf();
@@ -279,9 +278,9 @@ impl BottleDownloader {
                     }
                     let piece = piece.map_err(OilError::from)?;
                     let n = piece.len() as u64;
-                    counter.fetch_add(n, Ordering::Relaxed);
+                    *counter.lock().expect("download counter mutex poisoned") += n;
                     if let Some(ref t) = totals_chunk {
-                        t.downloaded.fetch_add(n, Ordering::Relaxed);
+                        *t.downloaded.lock().expect("download totals mutex poisoned") += n;
                     }
                     data.extend_from_slice(&piece);
                 }
@@ -308,7 +307,11 @@ impl BottleDownloader {
             loop {
                 tokio::time::sleep(Duration::from_millis(150)).await;
                 if let Some(ref pb) = pb_poll {
-                    pb.set_position(counter_poll.load(Ordering::Relaxed));
+                    pb.set_position(
+                        *counter_poll
+                            .lock()
+                            .expect("download counter mutex poisoned"),
+                    );
                 }
             }
         });
@@ -331,9 +334,13 @@ impl BottleDownloader {
 
         if err.is_some() {
             if let Some(ref t) = totals {
-                let partial = downloaded_so_far.load(Ordering::Relaxed);
+                let partial = *downloaded_so_far
+                    .lock()
+                    .expect("download counter mutex poisoned");
                 if partial > 0 {
-                    t.downloaded.fetch_sub(partial, Ordering::Relaxed);
+                    let mut downloaded =
+                        t.downloaded.lock().expect("download totals mutex poisoned");
+                    *downloaded = downloaded.saturating_sub(partial);
                 }
             }
         }
@@ -389,7 +396,7 @@ impl BottleDownloader {
         }
         if let Some(t) = totals {
             if content_length == 0 && total_size > 0 {
-                t.expected.fetch_add(total_size, Ordering::Relaxed);
+                *t.expected.lock().expect("download totals mutex poisoned") += total_size;
             }
         }
 
@@ -412,7 +419,7 @@ impl BottleDownloader {
                 pb.set_position(downloaded);
             }
             if let Some(t) = totals {
-                t.downloaded.fetch_add(n, Ordering::Relaxed);
+                *t.downloaded.lock().expect("download totals mutex poisoned") += n;
             }
         }
 

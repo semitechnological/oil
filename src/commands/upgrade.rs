@@ -479,8 +479,14 @@ async fn upgrade_all(cache: &Cache, dry_run: bool, start: std::time::Instant) ->
                 if hide.load(Ordering::Relaxed) {
                     return;
                 }
-                let pos = totals.downloaded.load(Ordering::Relaxed);
-                let len = totals.expected.load(Ordering::Relaxed);
+                let pos = *totals
+                    .downloaded
+                    .lock()
+                    .expect("download totals mutex poisoned");
+                let len = *totals
+                    .expected
+                    .lock()
+                    .expect("download totals mutex poisoned");
                 let cap = len.max(pos).max(1);
                 pb.set_length(cap);
                 pb.set_position(pos);
