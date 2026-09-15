@@ -938,7 +938,8 @@ impl StagingContext {
             }
             "tar.gz" | "tar" | "tgz" | "tar.bz2" | "tbz" | "tar.xz" | "txz" => {
                 let tar_output = tokio::process::Command::new("tar")
-                    .arg("-xf")
+                    .arg("-x")
+                    .arg("-f")
                     .arg(download_path)
                     .arg("-C")
                     .arg(&staging_root)

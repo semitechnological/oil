@@ -6,7 +6,8 @@ use inquire::Confirm;
 use std::io::IsTerminal;
 use tracing::{info, instrument};
 
-const GITHUB_REPO_URL: &str = "https://github.com/semitechnological/wax";
+const GITHUB_REPO_URL: &str = "https://github.com/semitechnological/oil";
+const CRATES_IO_CRATE: &str = "oilpkg";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Channel {
@@ -45,8 +46,8 @@ fn is_newer(current: &str, latest: &str) -> bool {
 
 async fn fetch_latest_crate_version(client: &reqwest::Client) -> Result<String> {
     let resp = client
-        .get("https://crates.io/api/v1/crates/oil")
-        .header("User-Agent", "wax-self-update")
+        .get(format!("https://crates.io/api/v1/crates/{CRATES_IO_CRATE}"))
+        .header("User-Agent", "oil-self-update")
         .send()
         .await
         .map_err(|e| OilError::SelfUpdateError(format!("crates.io API request failed: {e}")))?;
@@ -142,10 +143,10 @@ async fn update_from_crates(force: bool) -> Result<()> {
     println!(
         "  {} running {} (live output below)",
         style("install:").dim(),
-        style("cargo install oil --bin wax --force").yellow()
+        style(format!("cargo install {CRATES_IO_CRATE} --bin oil --force")).yellow()
     );
 
-    let mut args = vec!["install", "oil", "--bin", "oil"];
+    let mut args = vec!["install", CRATES_IO_CRATE, "--bin", "oil"];
     if force || is_newer(CURRENT_VERSION, &latest_version) {
         args.push("--force");
     }
@@ -189,7 +190,7 @@ fn cleanup_nightly_artifacts() -> Result<usize> {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with("wax-") && path.is_dir() && std::fs::remove_dir_all(&path).is_ok() {
+            if name.starts_with("oil-") && path.is_dir() && std::fs::remove_dir_all(&path).is_ok() {
                 removed += 1;
             }
         }
@@ -211,7 +212,7 @@ fn should_cleanup_nightly(nightly_cleanup: Option<bool>) -> Result<bool> {
                 );
                 return Ok(false);
             }
-            Confirm::new("Clean Cargo git cache for wax nightly sources?")
+            Confirm::new("Clean Cargo git cache for oil nightly sources?")
                 .with_default(false)
                 .prompt()
                 .map_err(|e| OilError::SelfUpdateError(format!("Failed to read prompt input: {e}")))
@@ -286,7 +287,12 @@ mod tests {
 
     #[test]
     fn nightly_update_uses_release_repository() {
-        assert_eq!(GITHUB_REPO_URL, "https://github.com/semitechnological/wax");
+        assert_eq!(GITHUB_REPO_URL, "https://github.com/semitechnological/oil");
+    }
+
+    #[test]
+    fn stable_update_uses_oilpkg_crate() {
+        assert_eq!(CRATES_IO_CRATE, "oilpkg");
     }
 
     #[test]

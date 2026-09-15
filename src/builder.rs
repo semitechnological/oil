@@ -138,7 +138,9 @@ impl Builder {
         tokio::fs::create_dir_all(dest).await?;
 
         let output = Command::new("tar")
-            .arg("xzf")
+            .arg("-x")
+            .arg("-z")
+            .arg("-f")
             .arg(tarball)
             .arg("-C")
             .arg(dest)

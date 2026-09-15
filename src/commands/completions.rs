@@ -1,4 +1,4 @@
-use crate::error::{Result, OilError};
+use crate::error::{OilError, Result};
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
 use std::io;
@@ -42,7 +42,7 @@ fn install_completions(shell: Shell) -> Result<()> {
         Shell::Zsh => {
             let dir = PathBuf::from(&home).join(".zsh/completions");
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join("_wax");
+            let path = dir.join("_oil");
             let mut buf = Vec::new();
             let mut cmd = Cli::command();
             generate(Shell::Zsh, &mut cmd, "oil", &mut buf);
@@ -60,7 +60,7 @@ fn install_completions(shell: Shell) -> Result<()> {
         Shell::Fish => {
             let dir = PathBuf::from(&home).join(".config/fish/completions");
             std::fs::create_dir_all(&dir)?;
-            let path = dir.join("wax.fish");
+            let path = dir.join("oil.fish");
             let mut buf = Vec::new();
             let mut cmd = Cli::command();
             generate(Shell::Fish, &mut cmd, "oil", &mut buf);
@@ -68,7 +68,7 @@ fn install_completions(shell: Shell) -> Result<()> {
         }
         _ => {
             return Err(OilError::InstallError(format!(
-                "Auto-install not supported for {:?}. Use `wax completions {:?}` and redirect manually.",
+                "Auto-install not supported for {:?}. Use `oil completions {:?}` and redirect manually.",
                 shell, shell
             )));
         }

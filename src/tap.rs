@@ -318,7 +318,14 @@ impl TapManager {
         debug!("Cloning tap from {}", url);
 
         let output = crate::commands::path::git_cmd()
-            .args(["clone", "--depth=1", "--single-branch", &url, &tap.path.to_string_lossy()])
+            .args([
+                "clone",
+                "--depth=1",
+                "--single-branch",
+                "--",
+                &url,
+                &tap.path.to_string_lossy(),
+            ])
             .output()
             .await?;
 

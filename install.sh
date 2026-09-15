@@ -253,7 +253,7 @@ install_from_release() {
 _src="${BASH_SOURCE[0]:-}"
 if [[ -n "$_src" ]] && [[ "$(basename -- "$_src")" == "install.sh" ]] && [[ "${OIL_USE_RELEASE:-}" != "1" ]]; then
   _root="$(cd "$(dirname -- "$_src")" && pwd)"
-  if [ -f "${_root}/Cargo.toml" ] && grep -q 'name = "oil"' "${_root}/Cargo.toml"; then
+  if [ -f "${_root}/Cargo.toml" ] && grep -q 'name = "oilpkg"' "${_root}/Cargo.toml"; then
     install_from_repo "$_root"
     exit 0
   fi
