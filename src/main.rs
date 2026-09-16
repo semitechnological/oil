@@ -10,6 +10,7 @@ mod discovery;
 mod ecosystem_install;
 mod error;
 mod formula_parser;
+mod http_client;
 mod install;
 mod lockfile;
 mod package_spec;

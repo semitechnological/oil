@@ -55,8 +55,11 @@ fetch_crates() {
   export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
   # shellcheck disable=SC1091
   source "$CARGO_HOME/env"
-  # Oil gitignores Cargo.lock; fetch without --locked.
-  cargo fetch
+  if [[ -f Cargo.lock ]]; then
+    cargo fetch --locked
+  else
+    cargo fetch
+  fi
 }
 
 time_step "apt build deps" install_apt_deps

@@ -213,11 +213,7 @@ pub async fn version_install(
         style(version).cyan()
     );
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()
-        .map_err(OilError::HttpError)?;
+    let client = crate::http_client::default_client().clone();
 
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(

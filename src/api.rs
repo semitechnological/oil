@@ -236,13 +236,9 @@ pub struct FetchResult<T> {
 
 impl ApiClient {
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .gzip(true)
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self { client }
+        Self {
+            client: crate::http_client::api().clone(),
+        }
     }
 
     #[instrument(skip(self))]

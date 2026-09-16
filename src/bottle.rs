@@ -27,13 +27,9 @@ impl BottleDownloader {
     const TRANSIENT_RETRY_ATTEMPTS: usize = 3;
 
     pub fn new() -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
-            .gzip(false)
-            .build()
-            .expect("Failed to create HTTP client");
-
-        Self { client }
+        Self {
+            client: crate::http_client::download().clone(),
+        }
     }
 
     // Minimum file size to bother splitting across multiple connections.

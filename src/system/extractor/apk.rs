@@ -33,10 +33,9 @@ fn untar<R: Read>(reader: R, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathB
             continue;
         }
 
-        let stripped = entry_str.strip_prefix("./").unwrap_or(&entry_str);
-        if stripped.is_empty() || stripped.contains("..") {
+        let Some(stripped) = super::archive_rel_path(&entry_str) else {
             continue;
-        }
+        };
 
         let dest = dest_dir.join(stripped);
         if let Some(parent) = dest.parent() {
@@ -74,7 +73,9 @@ fn untar<R: Read>(reader: R, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathB
         for entry_ in inner.entries()? {
             let mut entry = entry_?;
             let path = entry.path()?.to_string_lossy().to_string();
-            let stripped = path.strip_prefix("./").unwrap_or(&path);
+            let Some(stripped) = super::archive_rel_path(&path) else {
+                continue;
+            };
             let dest = dest_dir.join(stripped);
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;

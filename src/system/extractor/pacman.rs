@@ -42,14 +42,12 @@ fn untar<R: Read>(reader: R, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathB
         let entry_str = entry_path.to_string_lossy().to_string();
 
         // Skip leading "./"
-        let stripped = entry_str.strip_prefix("./").unwrap_or(&entry_str);
+        let Some(stripped) = super::archive_rel_path(&entry_str) else {
+            continue;
+        };
 
         // Skip metadata files
         if SKIP_FILES.contains(&stripped) {
-            continue;
-        }
-
-        if stripped.is_empty() || stripped.contains("..") {
             continue;
         }
 

@@ -18,7 +18,7 @@ on:
         required: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   check:
@@ -30,19 +30,22 @@ jobs:
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: cargo check
-        run: cargo check
+        run: cargo check --locked --all-targets
 
       - name: cargo test
-        run: cargo test
+        run: cargo test --locked --all-targets
 
       - name: cargo clippy
-        run: cargo clippy -- -D warnings
-        continue-on-error: true
+        run: cargo clippy --locked --all-targets -- -D warnings
   auto-tag:
     name: Auto-tag on version bump
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs: check
     if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') }}
     steps:
@@ -366,6 +369,8 @@ jobs:
 
   create-release:
     name: Create GitHub release
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     needs: [check, generate-notes, build, build-macos]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'

@@ -428,10 +428,7 @@ impl SystemManager {
     }
 
     async fn load_registry(&self) -> Result<PackageIndex> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| OilError::InstallError(format!("HTTP client: {}", e)))?;
+        let client = crate::http_client::registry().clone();
 
         match self.pm {
             #[cfg(any(feature = "system-apt", feature = "system-all"))]
