@@ -76,6 +76,11 @@ impl AptRegistry {
         )
     }
 
+    #[cfg(test)]
+    fn mirror(&self) -> &str {
+        &self.mirror
+    }
+
     fn cache_path(&self) -> Result<std::path::PathBuf> {
         let dir = crate::ui::dirs::oil_cache_dir()?.join("system");
         std::fs::create_dir_all(&dir)?;
@@ -462,6 +467,15 @@ pub(crate) fn parse_packages_file(content: &str, mirror: &str) -> Vec<PackageMet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ubuntu_and_debian_defaults_use_https() {
+        assert!(AptRegistry::ubuntu_default().mirror().starts_with("https://"));
+        assert_eq!(
+            AptRegistry::debian_default().mirror(),
+            "https://deb.debian.org/debian"
+        );
+    }
 
     #[test]
     fn test_family_from_os_release_detects_debian() {

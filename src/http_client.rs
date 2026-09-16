@@ -56,4 +56,20 @@ mod tests {
         assert!(ua.starts_with("oilpkg/"));
         assert!(ua.contains("semitechnological/oil"));
     }
+
+    #[tokio::test]
+    async fn https_only_rejects_plaintext_http() {
+        for client in [api(), download(), default_client(), registry()] {
+            let err = client
+                .get("http://127.0.0.1/")
+                .send()
+                .await
+                .expect_err("plaintext HTTP must be rejected");
+            let msg = err.to_string().to_ascii_lowercase();
+            assert!(
+                msg.contains("https") || msg.contains("http"),
+                "unexpected https_only error: {err}"
+            );
+        }
+    }
 }
