@@ -46,8 +46,8 @@ impl AptRegistry {
     pub fn ubuntu_default() -> Self {
         let suite = debian_suite_from_os_release().unwrap_or_else(|| "noble".to_string());
         let mirror = match std::env::consts::ARCH {
-            "x86_64" => "http://archive.ubuntu.com/ubuntu",
-            _ => "http://ports.ubuntu.com/ubuntu-ports",
+            "x86_64" => "https://archive.ubuntu.com/ubuntu",
+            _ => "https://ports.ubuntu.com/ubuntu-ports",
         };
         Self::new_with_components(
             mirror,
@@ -65,7 +65,7 @@ impl AptRegistry {
     pub fn debian_default() -> Self {
         let suite = debian_suite_from_os_release().unwrap_or_else(|| "bookworm".to_string());
         Self::new_with_components(
-            "http://deb.debian.org/debian",
+            "https://deb.debian.org/debian",
             &suite,
             vec![
                 "main".to_string(),
@@ -514,7 +514,7 @@ SHA256: def456abc123def456abc123def456abc123def456abc123def456abc123def456
 Description: retrieves files from the web
 
 "#;
-        let pkgs = parse_packages_file(sample, "http://archive.ubuntu.com/ubuntu");
+        let pkgs = parse_packages_file(sample, "https://archive.ubuntu.com/ubuntu");
         assert_eq!(pkgs.len(), 2);
 
         let curl = pkgs.iter().find(|p| p.name == "curl").unwrap();
@@ -528,7 +528,7 @@ Description: retrieves files from the web
         assert!(curl.depends.contains(&"zlib1g".to_string()));
         assert_eq!(
             curl.download_url,
-            "http://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl_7.81.0-1ubuntu1.13_amd64.deb"
+            "https://archive.ubuntu.com/ubuntu/pool/main/c/curl/curl_7.81.0-1ubuntu1.13_amd64.deb"
         );
 
         let wget = pkgs.iter().find(|p| p.name == "wget").unwrap();
@@ -547,7 +547,7 @@ Description: Vi IMproved - enhanced vi editor
  Vim is an almost compatible version of the UNIX editor vi.
 
 "#;
-        let pkgs = parse_packages_file(sample, "http://mirror.example.com");
+        let pkgs = parse_packages_file(sample, "https://mirror.example.com");
         assert_eq!(pkgs.len(), 1);
         assert_eq!(pkgs[0].description, "Vi IMproved - enhanced vi editor");
     }

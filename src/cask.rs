@@ -1231,10 +1231,7 @@ impl CaskInstaller {
     /// Falls back to a ranged GET if HEAD is not supported (e.g. 405).
     /// Returns None if type cannot be determined.
     pub async fn probe_artifact_type(&self, url: &str) -> Option<&'static str> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(15))
-            .build()
-            .ok()?;
+        let client = crate::http_client::default_client();
 
         let response = match client.head(url).send().await {
             Ok(r) if r.status().is_success() => r,

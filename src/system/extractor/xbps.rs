@@ -21,8 +21,7 @@ fn untar<R: Read>(reader: R, dest_dir: &Path) -> Result<(Vec<PathBuf>, Vec<PathB
         let entry_path = entry.path()?;
         let entry_str = entry_path.to_string_lossy().to_string();
         if entry_str.contains(".xbps") || entry_str.starts_with(".XBD") { continue; }
-        let stripped = entry_str.strip_prefix("./").unwrap_or(&entry_str);
-        if stripped.is_empty() || stripped.contains("..") { continue; }
+        let Some(stripped) = super::archive_rel_path(&entry_str) else { continue; };
         let dest = dest_dir.join(stripped);
         if entry.header().entry_type().is_dir() {
             std::fs::create_dir_all(&dest)?; dirs.push(dest);

@@ -95,12 +95,8 @@ pub async fn self_update(
 }
 
 pub async fn available_stable_update() -> Result<Option<String>> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| OilError::SelfUpdateError(format!("HTTP client error: {e}")))?;
-
-    let latest_version = fetch_latest_crate_version(&client).await?;
+    let client = crate::http_client::default_client();
+    let latest_version = fetch_latest_crate_version(client).await?;
 
     if is_newer(CURRENT_VERSION, &latest_version) {
         Ok(Some(latest_version))
@@ -110,13 +106,10 @@ pub async fn available_stable_update() -> Result<Option<String>> {
 }
 
 async fn update_from_crates(force: bool) -> Result<()> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| OilError::SelfUpdateError(format!("HTTP client error: {e}")))?;
+    let client = crate::http_client::default_client();
 
     let spinner = create_spinner("Checking for updates…");
-    let latest_version = fetch_latest_crate_version(&client).await?;
+    let latest_version = fetch_latest_crate_version(client).await?;
     spinner.finish_and_clear();
 
     println!(

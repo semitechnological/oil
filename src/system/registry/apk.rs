@@ -31,7 +31,7 @@ impl ApkRegistry {
 
     pub fn alpine_default() -> Self {
         let branch = alpine_branch_from_os_release().unwrap_or_else(|| "v3.20".to_string());
-        Self::new("http://dl-cdn.alpinelinux.org/alpine", &branch)
+        Self::new("https://dl-cdn.alpinelinux.org/alpine", &branch)
     }
 
     fn cache_path(&self) -> Result<std::path::PathBuf> {
@@ -313,6 +313,16 @@ fn parse_apkindex(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn alpine_default_uses_https_cdn() {
+        let registry = ApkRegistry::new("https://dl-cdn.alpinelinux.org/alpine", "v3.20");
+        assert!(registry.index_url("main").starts_with("https://"));
+        assert_eq!(
+            ApkRegistry::alpine_default().index_url("main").split('/').take(3).collect::<Vec<_>>().join("/"),
+            "https://dl-cdn.alpinelinux.org"
+        );
+    }
 
     #[test]
     fn test_branch_from_os_release_uses_major_minor() {

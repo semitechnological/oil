@@ -539,10 +539,7 @@ impl FormulaParser {
 
         debug!("Fetching formula from: {}", url);
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| OilError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
+        let client = crate::http_client::api();
         let response = client.get(&url).send().await?;
 
         if !response.status().is_success() {
@@ -570,10 +567,7 @@ impl FormulaParser {
 
         debug!("Fetching cask from: {}", url);
 
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| OilError::ParseError(format!("Failed to create HTTP client: {}", e)))?;
+        let client = crate::http_client::api();
         let response = client.get(&url).send().await?;
 
         if !response.status().is_success() {
