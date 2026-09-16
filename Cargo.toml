@@ -1,6 +1,6 @@
 [package]
 name = "oilpkg"
-version = "0.3.16"
+version = "0.3.17"
 edition = "2021"
 authors = ["Oil Contributors"]
 description = "package manager to end all linux package managers"
