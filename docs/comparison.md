@@ -124,6 +124,8 @@ ffmpeg 8.1 — 287 files, 67.6 MB bottle — plus 8 dependencies (dav1d, x264, x
 † brew had deps pre-installed; wax started from scratch.
 
 > Run `bash benchmark.sh` from the repo root to reproduce these results on your machine.
+> Ruby remains preferred for JSON. Without Ruby, bottle metadata parsing uses LuaJIT 2.1 and the bundled MIT-licensed parser.
+> Token extraction uses that LuaJIT fallback too, retaining the existing `sed` fallback.
 
 ---
 
