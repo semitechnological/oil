@@ -16,6 +16,9 @@ exclude = [
     "assets/*",
     "docs/*",
     "benchmark.sh",
+    "scripts/benchmark_json.lua",
+    "scripts/json.lua",
+    "scripts/JSON-LICENSE.txt",
     ".github/*",
     "tests/*",
 ]

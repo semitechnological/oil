@@ -219,28 +219,8 @@ formula_bottle_url() {
             entry = preferred.map { |k| files[k] }.compact.find { |v| v["url"] }
             puts entry["url"] if entry
         ' <<< "$json"
-    elif command -v python3 &>/dev/null; then
-        python3 -c '
-import json, platform, sys
-data = json.load(sys.stdin)
-files = (((data.get("bottle") or {}).get("stable") or {}).get("files") or {})
-machine = platform.machine().lower()
-arm = "arm" in machine or "aarch64" in machine
-keys = list(files.keys())
-if sys.platform == "darwin":
-    preferred = [k for k in keys if k.startswith("arm64_")] if arm else [k for k in keys if not k.startswith("arm64_") and "linux" not in k]
-else:
-    preferred = [k for k in keys if "arm64_linux" in k] if arm else [k for k in keys if "x86_64_linux" in k]
-if "all" in files:
-    preferred.append("all")
-preferred += keys
-for key in preferred:
-    entry = files.get(key) or {}
-    url = entry.get("url")
-    if url:
-        print(url)
-        break
-' <<< "$json"
+    elif command -v luajit &>/dev/null; then
+        luajit scripts/benchmark_json.lua bottle-url <<< "$json"
     else
         return 1
     fi
@@ -249,8 +229,8 @@ for key in preferred:
 json_token_field() {
     if command -v ruby &>/dev/null; then
         ruby -rjson -e 'puts JSON.parse(STDIN.read)["token"].to_s'
-    elif command -v python3 &>/dev/null; then
-        python3 -c 'import json, sys; print((json.load(sys.stdin).get("token") or ""))'
+    elif command -v luajit &>/dev/null; then
+        luajit scripts/benchmark_json.lua token
     else
         sed -n 's/.*"token":"\([^"]*\)".*/\1/p'
     fi

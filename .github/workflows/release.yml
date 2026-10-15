@@ -28,6 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install LuaJIT
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - name: Test benchmark JSON helpers
+        run: bash tests/benchmark-json.sh
+
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
